@@ -17,6 +17,10 @@ nodes:
       - containerPort: 32000
         hostPort: 32000
         protocol: TCP
+      # ArgoCD UI (NodePort 30080 → localhost:30080)
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
 
   # ─── Worker Node 1 (backend + db) ────────────────────────────────────
   - role: worker
