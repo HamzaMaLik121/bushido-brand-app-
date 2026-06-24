@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHECKOUT | BUSHIDO</title>
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/navbar.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        .checkout-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 60px; margin-top: 40px; }
+        .form-group { margin-bottom: 25px; }
+        label { display: block; font-family: var(--font-heading); font-size: 0.6rem; margin-bottom: 10px; color: var(--text-sec); }
+        input, textarea { width: 100%; background: var(--bg-sec); border: 1px solid rgba(255,255,255,0.1); padding: 15px; color: white; font-family: inherit; }
+        input:focus, textarea:focus { border-color: var(--accent); outline: none; }
+        .order-summary { background: var(--bg-sec); padding: 30px; border: 1px solid rgba(255,255,255,0.05); }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container nav-content">
+            <div class="logo">武士道</div>
+            <ul class="nav-links">
+                <li><a href="index.html">HOME</a></li>
+                <li><a href="products.html">ARMORY</a></li>
+                <li><a href="about.html">STORY</a></li>
+                <li><a href="contact.html">SIGNAL</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="py-lg container">
+        <h1>DEPLOYMENT CENTER</h1>
+        <div class="checkout-grid">
+            <form id="checkout-form">
+                <div class="form-group">
+                    <label>SHIPPING COORDINATES</label>
+                    <textarea id="address" rows="4" placeholder="ENTER FULL ADDRESS" required></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">DEPLOY ORDER</button>
+            </form>
+            <div class="order-summary">
+                <h3>ORDER MANIFEST</h3>
+                <div id="manifest-items" class="py-md"></div>
+                <div class="total-row py-md" style="border-top: 1px solid rgba(255,255,255,0.1)">
+                    <p>TOTAL: <span id="manifest-total">$0.00</span></p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="../js/api.js"></script>
+    <script src="../js/cart.js"></script>
+    <script src="../js/checkout.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const manifest = document.getElementById('manifest-items');
+            manifest.innerHTML = cart.items.map(i => `<p>${i.name} x ${i.quantity} - $${(i.price * i.quantity).toFixed(2)}</p>`).join('');
+            const total = cart.items.reduce((a, b) => a + (b.price * b.quantity), 0);
+            document.getElementById('manifest-total').innerText = `$${total.toFixed(2)}`;
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+// Jenkinsfile
+// ─────────────────────────────────────────────────────────────────────────────
+// Bushido Brand - CI/CD Pipeline Configuration
+// Copy this template into the root of each application codebase.
+// Configure only the parameters listed below.
+// ─────────────────────────────────────────────────────────────────────────────
+// Param Explanations:
+// - appName: Name of the microservice (matching Kubernetes chart names)
+// - dockerHubRepo: Destination namespace + name in Docker Hub
+// - gitOpsRepo: Absolute GitHub HTTPS location of the GitOps repository
+// - helmValuePath: File path mapping to this service's Helm values.yaml
+// - sonarProjectKey: Registered project code in SonarQube
+// - argoApp: ArgoCD identifier referencing the corresponding Application CRD
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Library('jenkins-shared-lib@main') _
+
+buildPipeline(
+  appName:         'YOUR_SERVICE_NAME',                          // e.g., 'backend' or 'frontend'
+  dockerHubRepo:   'bushidobrand/YOUR_IMAGE_NAME',           // e.g., 'bushidobrand/bushido-brand-backend'
+  gitOpsRepo:      'github.com/BushidoBrand/bushido-brand-gitops.git',
+  helmValuePath:   'charts/YOUR_SERVICE_NAME/values.yaml',       // e.g., 'charts/backend/values.yaml'
+  sonarProjectKey: 'bushido-brand-YOUR_SERVICE_NAME',                // e.g., 'bushido-brand-backend'
+  argoApp:         'bushido-brand-YOUR_SERVICE_NAME',                // e.g., 'bushido-brand-backend'
+
+  // Optional overrides
+  gitOpsBranch:    'main',
+  argoAutoSync:    false,
+  slackChannel:    '#deployments',
+  dockerfile:      'Dockerfile',
+  buildContext:    '.'
+)

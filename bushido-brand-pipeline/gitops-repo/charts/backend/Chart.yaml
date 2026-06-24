@@ -1,0 +1,9 @@
+apiVersion: v2
+name: backend
+description: Flask REST API for product, auth, cart, and order management
+type: application
+version: 0.1.0
+appVersion: "latest"
+maintainers:
+  - name: DevSecOps Team
+    email: devsecops-team@bushidobrand.com

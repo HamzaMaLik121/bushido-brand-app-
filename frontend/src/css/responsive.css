@@ -1,0 +1,11 @@
+@media (max-width: 1024px) {
+    .container { padding: 0 20px; }
+    .nav-links { display: none; }
+    .hero-content h1 { font-size: 4rem; }
+    .cart-sidebar { width: 100%; right: -100%; }
+}
+
+@media (max-width: 768px) {
+    .grid-2 { grid-template-columns: 1fr; gap: 40px; }
+    .py-lg { padding: 80px 0; }
+}

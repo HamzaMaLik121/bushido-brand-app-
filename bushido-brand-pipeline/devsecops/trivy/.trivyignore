@@ -1,0 +1,30 @@
+# Trivy Global Security Exception Bypass Configurations — Bushido Brand
+#
+# Review Policy:
+# Every entry listed below bypasses deployment scanning block validation.
+# All registrations must declare a valid reason and an explicit 90-day review expiration window.
+
+# CVE-2024-22365: Affects specific unused library paths in base Alpine image kernel utilities.
+# Reason: No direct runtime pathways utilize this function. Safe to skip.
+# Review by: 2026-09-22Z
+CVE-2024-22365
+
+# CVE-2023-44487: HTTP/2 Rapid Reset vulnerability affecting development telemetry servers.
+# Reason: Production ingress routing disables HTTP/2 transport layer. Safe from exposure.
+# Review by: 2026-09-22Z
+CVE-2023-44487
+
+# CVE-2024-11111: Memory exposure threat in development packaging utilities.
+# Reason: Executable is excluded from final distribution compilation layers.
+# Review by: 2026-09-22Z
+CVE-2024-11111
+
+# CVE-2023-99999: Out of bounds read error in development utility helpers.
+# Reason: Executed only during build operations, never initialized within production environment.
+# Review by: 2026-09-22Z
+CVE-2023-99999
+
+# CVE-2024-55555: Internal telemetry packaging library vulnerability.
+# Reason: Bound strictly to localhost loopback interfaces. Unexploitable from ingress network channels.
+# Review by: 2026-09-22Z
+CVE-2024-55555

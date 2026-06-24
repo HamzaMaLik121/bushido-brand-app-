@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bushido-brand
+  labels:
+    name: bushido-brand
+    tier: application

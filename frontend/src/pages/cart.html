@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARMORY CART | BUSHIDO</title>
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/navbar.css">
+    <link rel="stylesheet" href="../css/cart.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container nav-content">
+            <div class="logo">武士道</div>
+            <ul class="nav-links">
+                <li><a href="index.html">HOME</a></li>
+                <li><a href="products.html">ARMORY</a></li>
+                <li><a href="about.html">STORY</a></li>
+                <li><a href="contact.html">SIGNAL</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="py-lg container">
+        <h1>YOUR ARMORY</h1>
+        <div class="cart-items py-md">
+            <!-- Loaded via cart.js -->
+        </div>
+        <div class="cart-footer">
+            <h3>TOTAL: <span id="cart-total-val">$0.00</span></h3>
+            <a href="checkout.html" class="btn btn-primary mt-4">PROCEED TO DEPLOYMENT</a>
+        </div>
+    </main>
+
+    <script src="../js/cart.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => cart.render());
+    </script>
+</body>
+</html>

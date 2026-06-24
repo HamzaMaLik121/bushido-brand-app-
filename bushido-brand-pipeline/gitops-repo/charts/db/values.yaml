@@ -1,0 +1,91 @@
+# ─── Image ────────────────────────────────────────────────────────────────────
+image:
+  repository: mysql
+  tag: 8.0
+  pullPolicy: IfNotPresent
+
+# ─── Database Config ──────────────────────────────────────────────────────────
+# These values are used for local dev. In production, use K8s secrets.
+# Secret references are defined in the StatefulSet template.
+database:
+  name: bushido_db
+  rootPasswordSecret: mysql-root-password  # K8s Secret key: password
+  user: bushido_user
+  userPasswordSecret: mysql-user-password  # K8s Secret key: password
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+# Names of K8s Secret resources containing the MySQL credentials.
+# These secrets must exist in the namespace before deploying.
+#
+# If secrets.create is true, inline secrets are created (not recommended for production
+# — use external tools like sealed-secrets or external-secrets operator instead).
+secrets:
+  create: false
+  rootPassword: "change-me-root-password"
+  userPassword: "change-me-user-password"
+
+# ─── Service ──────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 3306
+  targetPort: 3306
+
+# ─── Storage ──────────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""  # empty = use default storage class
+  accessMode: ReadWriteOnce
+
+# ─── Resources ────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# ─── Security ─────────────────────────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: false    # MySQL runs as root inside container by design
+  fsGroup: 999           # mysql user GID
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+# ─── Health Checks ────────────────────────────────────────────────────────────
+livenessProbe:
+  exec:
+    command:
+      - mysqladmin
+      - ping
+      - -h
+      - localhost
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  failureThreshold: 5
+
+readinessProbe:
+  exec:
+    command:
+      - mysqladmin
+      - ping
+      - -h
+      - localhost
+  initialDelaySeconds: 30
+  periodSeconds: 5
+  failureThreshold: 3
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

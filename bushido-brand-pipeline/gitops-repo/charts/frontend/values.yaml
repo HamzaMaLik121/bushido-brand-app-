@@ -1,0 +1,81 @@
+# ─── Replica & Scaling ────────────────────────────────────────────────────────
+replicaCount: 2
+
+# ─── Image ────────────────────────────────────────────────────────────────────
+image:
+  repository: bushidobrand/bushido-brand-frontend
+  tag: latest                                    # ← bumped automatically on every main push
+  pullPolicy: IfNotPresent
+
+# ─── Service ──────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+# ─── Resources ────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# ─── Autoscaling ──────────────────────────────────────────────────────────────
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# ─── Health Checks ────────────────────────────────────────────────────────────
+livenessProbe:
+  httpGet:
+    path: /
+    port: 80
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: 80
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  failureThreshold: 3
+
+# ─── Security ─────────────────────────────────────────────────────────────────
+# Non-root compliance configs matching security standards
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 2000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# ─── Backend Proxy ───────────────────────────────────────────────────────────
+# The backend service hostname (used by nginx ConfigMap to proxy /api/ requests)
+backendHost: backend
+backendPort: 80
+
+# ─── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: nginx
+  host: bushidobrand.com
+  tls:
+    enabled: false
+    secretName: frontend-tls
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

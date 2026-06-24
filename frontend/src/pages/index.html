@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BUSHIDO | Modern Samurai Streetwear</title>
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/navbar.css">
+    <link rel="stylesheet" href="../css/hero.css">
+    <link rel="stylesheet" href="../css/products.css">
+    <link rel="stylesheet" href="../css/cart.css">
+    <link rel="stylesheet" href="../css/animations.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+</head>
+<body>
+    <div id="navbar-placeholder">
+        <nav class="navbar">
+            <div class="container nav-content">
+                <div class="logo">武士道 <span class="brand">BUSHIDO</span></div>
+                <ul class="nav-links">
+                    <li><a href="index.html" class="active">HOME</a></li>
+                    <li><a href="products.html">ARMORY</a></li>
+                    <li><a href="about.html">STORY</a></li>
+                    <li><a href="contact.html">SIGNAL</a></li>
+                </ul>
+                <div class="nav-actions">
+                    <div class="cart-trigger" id="cart-btn">
+                        <span class="count">0</span>
+                        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z" fill="white"/></svg>
+                    </div>
+                </div>
+            </div>
+        </nav>
+    </div>
+
+    <main>
+        <section class="hero">
+            <div class="hero-parallax" data-speed="0.2"></div>
+            <div class="container hero-content">
+                <div class="reveal">
+                    <h1 class="glitch" data-text="BUSHIDO">BUSHIDO</h1>
+                </div>
+                <p class="subtitle fade-in">UNBOUND BY TRADITION. DRIVEN BY THE CODE.</p>
+                <div class="hero-actions fade-in">
+                    <a href="products.html" class="btn btn-primary">SHOP COLLECTION</a>
+                    <a href="#featured" class="btn btn-outline">VIEW DROPS</a>
+                </div>
+            </div>
+            <div class="scroll-prompt">
+                <div class="mouse"></div>
+                <span>SCROLL</span>
+            </div>
+        </section>
+
+        <section id="featured" class="py-lg container">
+            <div class="section-header text-center mb-4">
+                <h2>FEATURED ARTIFACTS</h2>
+                <p>LIMITED QUANTITIES. NEVER RESTOCKED.</p>
+            </div>
+            <div class="product-grid" id="products-grid">
+                <!-- Injected via products.js -->
+            </div>
+        </section>
+    </main>
+
+    <div class="cart-sidebar" id="cart-sidebar">
+        <div class="cart-header">
+            <h3>ARMORY</h3>
+            <button class="btn-close" id="close-cart">&times;</button>
+        </div>
+        <div class="cart-items"></div>
+        <div class="cart-footer">
+            <div class="cart-total">
+                <span>TOTAL</span>
+                <span id="cart-total-val">$0.00</span>
+            </div>
+            <a href="checkout.html" class="btn btn-primary w-100">PROCEED TO DEPLOYMENT</a>
+        </div>
+    </div>
+
+    <script src="../js/api.js"></script>
+    <script src="../js/cart.js"></script>
+    <script src="../js/products.js"></script>
+    <script src="../js/animations.js"></script>
+    <script>
+        document.getElementById('cart-btn').onclick = () => document.getElementById('cart-sidebar').classList.add('active');
+        document.getElementById('close-cart').onclick = () => document.getElementById('cart-sidebar').classList.remove('active');
+    </script>
+</body>
+</html>

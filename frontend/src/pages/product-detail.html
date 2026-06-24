@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRODUCT DETAIL | BUSHIDO</title>
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/navbar.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container nav-content">
+            <div class="logo">武士道</div>
+            <ul class="nav-links">
+                <li><a href="index.html">HOME</a></li>
+                <li><a href="products.html">ARMORY</a></li>
+                <li><a href="about.html">STORY</a></li>
+                <li><a href="contact.html">SIGNAL</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="py-lg container">
+        <div id="product-detail-content" class="grid-2">
+            <!-- Loaded via JS -->
+            <p>LOADING ARTIFACT DATA...</p>
+        </div>
+    </main>
+
+    <script src="../js/api.js"></script>
+    <script src="../js/cart.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const params = new URLSearchParams(window.location.search);
+            const id = params.get('id');
+            if (!id) return;
+
+            try {
+                const p = await api.get(`/products/${id}`);
+                document.getElementById('product-detail-content').innerHTML = `
+                    <img src="${p.image_url}" alt="${p.name}" style="width: 100%;">
+                    <div>
+                        <h1>${p.name}</h1>
+                        <p class="py-md">${p.description}</p>
+                        <h2 style="color: var(--accent);">$${p.price.toFixed(2)}</h2>
+                        <button class="btn btn-primary mt-4" onclick="cart.add(${JSON.stringify(p).replace(/"/g, '&quot;')})">ADD TO ARMORY</button>
+                    </div>
+                `;
+            } catch (err) {
+                console.error(err);
+            }
+        });
+    </script>
+</body>
+</html>

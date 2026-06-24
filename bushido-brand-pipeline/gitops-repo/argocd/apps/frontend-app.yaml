@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bushido-brand-frontend
+  namespace: argocd
+  labels:
+    project: bushido-brand
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io # Cascades deletions from Argo to K8s
+spec:
+  project: bushido-brand
+  source:
+    repoURL: https://github.com/BushidoBrand/bushido-brand-gitops.git
+    targetRevision: main
+    path: charts/frontend
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: bushido-brand
+  syncPolicy:
+    automated:
+      prune: true       # Wipes elements deleted from Git
+      selfHeal: true    # Overwrites manual cluster changes to prevent configuration drift
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 3
