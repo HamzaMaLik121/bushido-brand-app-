@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# setup.sh — Bushido Brand KIND Cluster + Jenkins
+# setup.sh — Bushido Brand KIND Cluster + Jenkins + ArgoCD
 # ─────────────────────────────────────────────────────────────────────────────
 # Usage:
 #   chmod +x setup.sh && ./setup.sh
@@ -9,8 +9,10 @@
 #   1. Checks prerequisites (kind, kubectl, helm, docker)
 #   2. Creates a KIND cluster with 1 control-plane + 3 workers
 #   3. Installs Jenkins via Helm with Blue Ocean + Kubernetes plugin
-#   4. Waits for Jenkins to be ready
-#   5. Prints the admin password and direct access URL
+#   4. Installs ArgoCD via Helm for GitOps deployments
+#   5. Bootstraps ArgoCD app-of-apps to deploy Bushido Brand
+#   6. Waits for Jenkins to be ready
+#   7. Prints the admin passwords and access URLs
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -82,14 +84,73 @@ fi
 
 pass "Jenkins installed."
 
-# ─── Step 6: Wait for Jenkins Pod ───────────────────────────────────────────
+# ─── Step 6: Add ArgoCD Helm Repository ──────────────────────────────────────
+info "Adding ArgoCD Helm repository..."
+helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true
+helm repo update 2>/dev/null || true
+pass "ArgoCD Helm repo added."
+
+# ─── Step 7: Create ArgoCD Namespace ─────────────────────────────────────────
+info "Creating 'argocd' namespace..."
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+pass "Namespace 'argocd' ready."
+
+# ─── Step 8: Install ArgoCD ──────────────────────────────────────────────────
+ARGOCD_RELEASE="bushido-argocd"
+
+if helm status "${ARGOCD_RELEASE}" -n argocd >/dev/null 2>&1; then
+  warn "ArgoCD release '${ARGOCD_RELEASE}' already exists. Upgrading..."
+  helm upgrade "${ARGOCD_RELEASE}" argo/argo-cd \
+    --namespace argocd \
+    --version 7.8.1 \
+    --set server.service.type=NodePort \
+    --set server.service.nodePortHttp=30080 \
+    --set server.service.nodePortHttps=30443 \
+    --set configs.params.server.insecure=true \
+    --wait \
+    --timeout 5m
+else
+  info "Installing ArgoCD via Helm..."
+  helm install "${ARGOCD_RELEASE}" argo/argo-cd \
+    --namespace argocd \
+    --version 7.8.1 \
+    --set server.service.type=NodePort \
+    --set server.service.nodePortHttp=30080 \
+    --set server.service.nodePortHttps=30443 \
+    --set configs.params.server.insecure=true \
+    --wait \
+    --timeout 5m
+fi
+
+pass "ArgoCD installed."
+
+# ─── Step 9: Get ArgoCD Admin Password ───────────────────────────────────────
+info "Waiting for ArgoCD server pod to be ready..."
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=argocd-server -n argocd --timeout=300s 2>/dev/null || {
+  warn "Timed out waiting for ArgoCD server pod. Checking status..."
+  kubectl get pods -n argocd
+}
+
+ARGOCD_PASSWORD=$(kubectl get secret "${ARGOCD_RELEASE}-argocd-initial-admin-secret" -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 --decode || echo "(see kubectl get secret -n argocd)")
+
+# ─── Step 10: Bootstrap GitOps Apps ──────────────────────────────────────────
+info "Bootstrapping ArgoCD applications (app-of-apps)..."
+kubectl apply -f "${SCRIPT_DIR}/../bushido-brand-pipeline/gitops-repo/argocd/project.yaml" 2>/dev/null || true
+kubectl apply -f "${SCRIPT_DIR}/../bushido-brand-pipeline/gitops-repo/argocd/app-of-apps.yaml" 2>/dev/null || true
+pass "ArgoCD applications bootstrapped."
+
+warn "NOTE: Backend and DB apps will show sync errors until secrets are created."
+warn "Create required secrets: kubectl create secret generic ... -n bushido-brand"
+warn "See bushido-brand-pipeline/gitops-repo/README.md for the full secrets list."
+
+# ─── Step 11: Wait for Jenkins Pod ───────────────────────────────────────────
 info "Waiting for Jenkins pod to be ready..."
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=jenkins -n jenkins --timeout=300s 2>/dev/null || {
   warn "Timed out waiting for pod. Checking status..."
   kubectl get pods -n jenkins
 }
 
-# ─── Step 7: Get Admin Password ─────────────────────────────────────────────
+# ─── Step 12: Get Jenkins Admin Password ─────────────────────────────────────
 info "Retrieving Jenkins admin password..."
 JENKINS_POD=$(kubectl get pods -n jenkins -l app.kubernetes.io/name=jenkins -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 ADMIN_PASSWORD=""
@@ -106,10 +167,10 @@ if [ -z "${ADMIN_PASSWORD}" ]; then
   ADMIN_PASSWORD="(check pod logs: kubectl logs ${JENKINS_POD} -n jenkins)"
 fi
 
-# ─── Step 8: Print Summary ──────────────────────────────────────────────────
+# ─── Step 13: Print Summary ──────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════════════════════════════"
-echo -e "  ${GREEN}Bushido Brand — KIND Cluster + Jenkins Ready${NC}"
+echo -e "  ${GREEN}Bushido Brand — KIND Cluster + Jenkins + ArgoCD Ready${NC}"
 echo "═══════════════════════════════════════════════════════════════════════════"
 echo ""
 echo -e "  ${BLUE}Jenkins URL:${NC}    http://localhost:32000"
