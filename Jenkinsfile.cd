@@ -39,7 +39,6 @@ pipeline {
     // ─── PIPELINE OPTIONS ───────────────────────────────────────────────────
     options {
         timestamps()                    // Prefix every log line with a timestamp
-        ansiColor('xterm')              // Enable colored ANSI output in logs
         timeout(time: 30, unit: 'MINUTES')  // CD should complete faster than CI
         disableConcurrentBuilds()       // Only one deploy at a time
         buildDiscarder(logRotator(numToKeepStr: '10'))  // Keep last 10 builds
