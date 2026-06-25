@@ -14,7 +14,7 @@
 //   - updateGitOps     → commits new image tag to GitOps repo (triggers ArgoCD)
 //   - syncArgoCD       → tells ArgoCD to sync the application immediately
 //   - notifySlack      → sends deployment notifications to Slack
-// @Library('Shared@main') _
+@Library('Shared@main') _
 
 pipeline {
     // ─── AGENT ──────────────────────────────────────────────────────────────

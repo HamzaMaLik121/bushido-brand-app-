@@ -13,7 +13,7 @@
 //  This library provides the custom functions used below (runOwaspCheck,
 //  runSonarScan, waitForQualityGate, buildDockerImage, runTrivyScan,
 //  pushToDockerHub, updateGitOps, syncArgoCD, notifySlack).
-// @Library('Shared@main') _
+@Library('Shared@main') _
 
 pipeline {
     // ─── AGENT ──────────────────────────────────────────────────────────────
