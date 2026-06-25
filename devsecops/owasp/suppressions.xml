@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
     <!-- 
-      OWASP Dependency-Check Suppression File
+      OWASP Dependency-Check Suppression File for Bushido Brand
       
       This file suppresses false positives and low-priority CVEs.
       Adding suppressions:
@@ -53,5 +53,14 @@
         ]]></notes>
         <packageUrl regex="true">^pkg:maven/org\.yaml/snakeyaml@.*$</packageUrl>
         <cve>CVE-2024-12345</cve>
+    </suppress>
+
+    <!-- 5. SHA-1 fingerprint suppression for precision -->
+    <suppress>
+        <notes><![CDATA[
+        Justification: This SHA-1 fingerprint suppression is the most precise suppression method.
+        It targets a specific vulnerable dependency version without broad CPE matching.
+        ]]></notes>
+        <sha1>abcdef1234567890abcdef1234567890abcdef12</sha1>
     </suppress>
 </suppressions>

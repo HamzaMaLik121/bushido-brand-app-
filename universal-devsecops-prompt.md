@@ -194,7 +194,7 @@ post:
 
 ### `vars/runOwaspCheck.groovy`
 
-- Credential: `nvd-api-key` (Secret Text)
+- Credential: `OWASP` (Secret Text)
 - Binary path: `/opt/dependency-check/bin/dependency-check.sh`
 - Flags: `--project`, `--scan .`, `--format HTML`, `--format XML`,
   `--out reports/`, `--nvdApiKey`, `--failOnCVSS 8`, `--enableRetired`,
@@ -205,7 +205,7 @@ post:
 
 ### `vars/runSonarScan.groovy`
 
-- Credentials: `sonar-token` (Secret Text), `sonar-url` (Secret Text)
+- Credential: `SONAR` (Secret Text) — combined token + URL
 - Wrap with `withSonarQubeEnv('SonarQube')` — name must match Jenkins global config
 - Run `sonar-scanner` with:
   `-Dsonar.projectKey`, `-Dsonar.projectName`, `-Dsonar.sources=.`,
@@ -240,8 +240,8 @@ post:
 
 ### `vars/updateGitOps.groovy`
 
-- Credential: `github-gitops-creds` (Username + Password — PAT with repo scope)
-- Clone: `https://${GIT_USER}:${GIT_TOKEN}@${gitOpsRepo}` into temp dir `gitops-tmp/`
+- Credential: `Github-cred` (Username + Password — PAT with repo scope)
+- Clone: `https://${GIT_USER}:${GIT_PASSWORD}@${gitOpsRepo}` into temp dir `gitops-tmp/`
 - Verify `helmValuePath` exists — error with helpful message if not
 - Update image tag using yq v4: `yq e '.image.tag = "TAG"' -i FILE`
 - Print the updated image block after change for confirmation
@@ -312,7 +312,7 @@ a developer needs to add to onboard a new service to the pipeline.
 // All pipeline logic lives in the shared library.
 // ─────────────────────────────────────────────────────────────────────────────
 
-@Library('jenkins-shared-lib@main') _
+@Library('Shared@main') _
 
 buildPipeline(
 
@@ -611,7 +611,7 @@ Full valid XML. 5 suppressions:
 
 - Download and install OWASP DC CLI to `/opt/dependency-check/`
 - How to get NVD API key (URL: https://nvd.nist.gov/developers/request-an-api-key)
-- How to add `nvd-api-key` to Jenkins Credentials Store (UI steps)
+- How to add `OWASP` credential to Jenkins Credentials Store (UI steps)
 - Full annotated CLI command (every flag explained inline)
 - What `--failOnCVSS 8` means (CVSS scale 0-10, 8+ = Critical/High)
 - How to tune the threshold for your risk appetite
@@ -663,10 +663,9 @@ One comprehensive file listing every credential the pipeline needs:
 | Credential ID          | Jenkins Type            | How to get the value                                              |
 |------------------------|-------------------------|-------------------------------------------------------------------|
 | `dockerhub-creds`      | Username + Password     | Docker Hub → Account Settings → Security → New Access Token      |
-| `nvd-api-key`          | Secret Text             | https://nvd.nist.gov/developers/request-an-api-key               |
-| `sonar-token`          | Secret Text             | SonarQube → My Account → Security → Generate Token               |
-| `sonar-url`            | Secret Text             | Your SonarQube server URL e.g. http://sonarqube.yourdomain.com   |
-| `github-gitops-creds`  | Username + Password     | GitHub → Settings → Developer Settings → Personal Access Tokens  |
+| `OWASP`                | Secret Text             | https://nvd.nist.gov/developers/request-an-api-key               |
+| `SONAR`                | Secret Text             | SonarQube → My Account → Security → Generate Token               |
+| `Github-cred`          | Username + Password     | GitHub → Settings → Developer Settings → Personal Access Tokens  |
 | `argocd-token`         | Secret Text             | `argocd account generate-token --account jenkins`                 |
 | `argocd-server`        | Secret Text             | Your ArgoCD server hostname e.g. argocd.yourdomain.com            |
 

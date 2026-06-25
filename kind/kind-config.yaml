@@ -22,7 +22,7 @@ nodes:
         hostPort: 30080
         protocol: TCP
 
-  # ─── Worker Node 1 (backend + db) ────────────────────────────────────
+  # ─── Worker Node 1 (backend + db + SonarQube) ─────────────────────────
   - role: worker
     extraPortMappings:
       - containerPort: 80
@@ -30,6 +30,10 @@ nodes:
         protocol: TCP
       - containerPort: 443
         hostPort: 443
+        protocol: TCP
+      # SonarQube UI (NodePort 32001 → localhost:32001)
+      - containerPort: 32001
+        hostPort: 32001
         protocol: TCP
 
   # ─── Worker Node 2 (frontend) ─────────────────────────────────────────

@@ -10,7 +10,7 @@
 // This file only sets config and calls the functions.
 // ─────────────────────────────────────────────────────────────────────────────
 
-@Library('jenkins-shared-lib@main') _
+@Library('Shared@main') _
 
 pipeline {
     agent { label 'docker-agent' }
@@ -76,7 +76,7 @@ pipeline {
                         dir('backend') {
                             runOwaspCheck(
                                 appName: 'bushido-brand-backend',
-                                suppressionPath: '../bushido-brand-pipeline/devsecops/owasp/suppressions.xml'
+                                suppressionPath: '../devsecops/owasp/suppressions.xml'
                             )
                         }
                     }

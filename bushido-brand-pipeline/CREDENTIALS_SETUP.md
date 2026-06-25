@@ -7,10 +7,9 @@ Use this guide to register credentials inside your Jenkins credentials store and
 | Credential ID | Jenkins Credentials Type | Intended Value and Origin |
 |---|---|---|
 | `dockerhub-creds` | Username with Password | Docker Hub Account Username + Access Token (generate at Docker Hub -> Account Settings -> Security -> New Access Token) |
-| `nvd-api-key` | Secret Text | NVD query token (generate at `nvd.nist.gov/developers/request-an-api-key`) |
-| `sonar-token` | Secret Text | SonarQube User token (generate at SonarQube -> My Account -> Security) |
-| `sonar-url` | Secret Text | Full URL endpoint of your SonarQube console (e.g. `http://sonarqube.internal:9000`) |
-| `github-gitops-creds` | Username with Password | GitHub Account Username + Personal Access Token (PAT) containing `repo` write scope |
+| `OWASP` | Secret Text | NVD query token for OWASP Dependency-Check (generate at `nvd.nist.gov/developers/request-an-api-key`) |
+| `SONAR` | Secret Text | SonarQube server URL (e.g. `http://sonarqube.internal:9000`). The SonarQube access token is configured globally in Jenkins under Manage Jenkins -> Configure System -> SonarQube servers -> Server authentication token. |
+| `Github-cred` | Username with Password | GitHub Account Username + Personal Access Token (PAT) containing `repo` write scope |
 | `argocd-token` | Secret Text | ArgoCD CLI authentication token (run `argocd account generate-token`) |
 | `argocd-server` | Secret Text | Connection hostname endpoint of the ArgoCD server (e.g., `argocd.internal`) |
 

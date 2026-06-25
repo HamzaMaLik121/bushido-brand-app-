@@ -117,10 +117,12 @@ bushido-brand/
 │   ├── gitops-repo/             # GitOps manifests
 │   │   ├── charts/              # 📦 Helm charts (frontend, backend, db)
 │   │   └── argocd/              # 🎯 ArgoCD application definitions
-│   └── devsecops/               # 🛡️ Security configs
-│       ├── sonarqube/
-│       ├── owasp/
-│       └── trivy/
+│   └── jenkins-shared-lib/      # 📚 Jenkins shared library
+│
+├── devsecops/                   # 🛡️ Security configs
+│   ├── sonarqube/               #   SonarQube SAST configuration
+│   ├── owasp/                   #   OWASP Dependency-Check (SCA)
+│   └── trivy/                   #   Trivy container scanning
 │
 ├── docker-compose.yml           # 🐳 Local dev environment
 ├── Jenkinsfile                  # 🔁 CI/CD pipeline definition

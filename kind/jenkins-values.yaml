@@ -91,6 +91,44 @@ JCasC:
     welcome-message: |
       jenkins:
         systemMessage: "Bushido Brand CI/CD — Local KIND Cluster\n\nAll pipelines run on dynamic Kubernetes pods."
+    credentials: |
+      jenkins:
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - usernamePassword:
+                      scope: GLOBAL
+                      id: "dockerhub-creds"
+                      username: "<dockerhub-username>"
+                      password: "<dockerhub-access-token>"
+                      description: "Docker Hub credentials for pushing images to registry"
+                  - string:
+                      scope: GLOBAL
+                      id: "OWASP"
+                      secret: "649dd528-6a82-4abb-9505-a2e0d83a9c82"
+                      description: "OWASP Dependency-Check NVD API Key for vulnerability scanning"
+                  - string:
+                      scope: GLOBAL
+                      id: "SONAR"
+                      secret: "<sonarqube-server-url>"
+                      description: "SonarQube server URL (token is configured globally in Jenkins Manage Jenkins -> Configure System -> SonarQube servers)"
+                  - usernamePassword:
+                      scope: GLOBAL
+                      id: "Github-cred"
+                      username: "<github-username>"
+                      password: "<github-personal-access-token>"
+                      description: "GitHub credentials with repo write scope for GitOps updates"
+                  - string:
+                      scope: GLOBAL
+                      id: "argocd-server"
+                      secret: "localhost:30080"
+                      description: "ArgoCD server endpoint"
+                  - string:
+                      scope: GLOBAL
+                      id: "argocd-token"
+                      secret: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhcmdvY2QiLCJzdWIiOiJqZW5raW5zOmFwaUtleSIsIm5iZiI6MTc4MjM0MzE2MCwiaWF0IjoxNzgyMzQzMTYwLCJqdGkiOiIwYjVmNzU2ZS0yMjRmLTRjOTItODU4Yi05MDk1Y2RlOTNiNDYifQ.ksbkHQJsxwrSGSiStsPfbYJi87Kvq4sPNntidqTJr9c"
+                      description: "ArgoCD API token for Jenkins pipeline"
     kubernetes-cloud: |
       jenkins:
         clouds:

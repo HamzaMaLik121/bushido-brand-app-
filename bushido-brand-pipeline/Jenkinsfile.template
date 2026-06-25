@@ -13,7 +13,7 @@
 // - argoApp: ArgoCD identifier referencing the corresponding Application CRD
 // ─────────────────────────────────────────────────────────────────────────────
 
-@Library('jenkins-shared-lib@main') _
+@Library('Shared@main') _
 
 buildPipeline(
   appName:         'YOUR_SERVICE_NAME',                          // e.g., 'backend' or 'frontend'
