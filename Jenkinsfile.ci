@@ -1,0 +1,303 @@
+// =============================================================================
+//  Jenkinsfile.ci — Bushido Brand CI Pipeline
+// =============================================================================
+//  FILE   : Jenkinsfile.ci
+//  JOB    : bushido-brand-CI  (create this name in Jenkins)
+//  WHAT   : Runs CI checks on EVERY branch push. If main/master/release/*
+//           passes, automatically triggers the CD job (bushido-brand-CD).
+// =============================================================================
+
+// ─── SHARED LIBRARY ──────────────────────────────────────────────────────────
+//  @Library('Shared@main') loads a shared Groovy library from a separate Git
+//  repo (configured in Jenkins under "Global Pipeline Libraries").
+//  This library provides the custom functions used below (runOwaspCheck,
+//  runSonarScan, waitForQualityGate, buildDockerImage, runTrivyScan,
+//  pushToDockerHub, updateGitOps, syncArgoCD, notifySlack).
+// @Library('Shared@main') _
+
+pipeline {
+    // ─── AGENT ──────────────────────────────────────────────────────────────
+    //  Runs on any Jenkins node that has the label 'docker-agent'. This agent
+    //  must have Docker, Git, and any required CLI tools installed.
+    agent { label 'docker-agent' }
+
+    // ─── PIPELINE OPTIONS ───────────────────────────────────────────────────
+    options {
+        timestamps()                    // Prefix every log line with a timestamp
+        ansiColor('xterm')              // Enable colored ANSI output in logs
+        timeout(time: 60, unit: 'MINUTES')  // Kill pipeline if it runs >60 min
+        disableConcurrentBuilds()       // Only one build at a time per branch
+        buildDiscarder(logRotator(numToKeepStr: '10'))  // Keep only last 10 builds
+    }
+
+    // ─── ENVIRONMENT VARIABLES ──────────────────────────────────────────────
+    //  These are available in all stages/steps. They configure paths, names,
+    //  and Docker image references for both backend and frontend.
+    environment {
+
+        // ─── Global Config ─────────────────────────────────────────────────
+        //  GIT_COMMIT_SHORT  → short SHA (e.g. "a1b2c3d"), set during checkout
+        GIT_COMMIT_SHORT = ''
+
+        // ─── Backend ───────────────────────────────────────────────────────
+        //  BACKEND_APP_NAME        → service name, used in Helm & ArgoCD
+        //  BACKEND_DOCKER_REPO     → Docker Hub repo for the backend image
+        //  BACKEND_HELM_VALUE_PATH → which Helm values.yaml to update in GitOps
+        //  BACKEND_SONAR_KEY       → SonarQube project key for backend analysis
+        //  BACKEND_ARGO_APP        → ArgoCD Application CRD name for backend
+        //  BACKEND_DOCKERFILE      → path to Dockerfile (relative to repo root)
+        //  BACKEND_BUILD_CONTEXT   → docker build context directory
+        //  BACKEND_IMAGE           → full image tag, set during checkout
+        BACKEND_APP_NAME        = 'backend'
+        BACKEND_DOCKER_REPO     = 'bushidobrand/bushido-brand-backend'
+        BACKEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/backend/values.yaml'
+        BACKEND_SONAR_KEY       = 'bushido-brand-backend'
+        BACKEND_ARGO_APP        = 'bushido-brand-backend'
+        BACKEND_DOCKERFILE      = 'backend/Dockerfile'
+        BACKEND_BUILD_CONTEXT   = 'backend'
+        BACKEND_IMAGE           = ''
+
+        // ─── Frontend ──────────────────────────────────────────────────────
+        //  (Same pattern as backend above but for the frontend Nginx service)
+        FRONTEND_APP_NAME        = 'frontend'
+        FRONTEND_DOCKER_REPO     = 'bushidobrand/bushido-brand-frontend'
+        FRONTEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/frontend/values.yaml'
+        FRONTEND_SONAR_KEY       = 'bushido-brand-frontend'
+        FRONTEND_ARGO_APP        = 'bushido-brand-frontend'
+        FRONTEND_DOCKERFILE      = 'frontend/Dockerfile'
+        FRONTEND_BUILD_CONTEXT   = 'frontend'
+        FRONTEND_IMAGE           = ''
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  STAGES — defined in order of execution
+    // ═════════════════════════════════════════════════════════════════════════
+    stages {
+
+        // ╔════════════════════════════════════════════════════════════════════╗
+        // ║   STAGE 1 — Checkout                                             ║
+        // ║   What: Clones the repo, computes short SHA, builds image tags    ║
+        // ╚════════════════════════════════════════════════════════════════════╝
+        stage('CI — Checkout') {
+            steps {
+                script {
+                    // checkout scm → Jenkins built-in: checks out the branch/commit
+                    // that triggered this build (from webhook or manual).
+                    checkout scm
+
+                    // git rev-parse --short HEAD → first 7 chars of commit hash
+                    // This is used as the Docker image tag for traceability.
+                    env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
+
+                    // Build full Docker image references like:
+                    //   bushidobrand/bushido-brand-backend:a1b2c3d
+                    env.BACKEND_IMAGE  = "${BACKEND_DOCKER_REPO}:${GIT_COMMIT_SHORT}"
+                    env.FRONTEND_IMAGE = "${FRONTEND_DOCKER_REPO}:${GIT_COMMIT_SHORT}"
+
+                    echo "Commit: ${GIT_COMMIT_SHORT}"
+                    echo "Backend image:  ${BACKEND_IMAGE}"
+                    echo "Frontend image: ${FRONTEND_IMAGE}"
+                }
+            }
+        }
+
+        // ╔════════════════════════════════════════════════════════════════════╗
+        // ║   STAGE 2 — Backend: OWASP & SonarQube (runs in parallel)         ║
+        // ║                                                                   ║
+        // ║   OWASP Dependency Check:                                         ║
+        // ║   → Scans Python dependencies for known CVEs                      ║
+        // ║   → Uses a suppressions.xml to ignore false-positives             ║
+        // ║   → Publishes report in Jenkins (dependencyCheckPublisher)         ║
+        // ║                                                                   ║
+        // ║   SonarQube Analysis:                                             ║
+        // ║   → Static code analysis (bugs, code smells, security hotspots)   ║
+        // ║   → Sends results to SonarQube server using project key           ║
+        // ╚════════════════════════════════════════════════════════════════════╝
+        stage('CI — Backend: OWASP & SonarQube') {
+            parallel {
+                stage('OWASP Dependency Check') {
+                    steps {
+                        dir('backend') {
+                            // runOwaspCheck → shared library function
+                            //   appName         : name for the OWASP report
+                            //   suppressionPath : XML file listing CVEs to ignore
+                            runOwaspCheck(
+                                appName: 'bushido-brand-backend',
+                                suppressionPath: '../devsecops/owasp/suppressions.xml'
+                            )
+                        }
+                    }
+                    // dependencyCheckPublisher → Jenkins plugin: parses OWASP XML
+                    // report and shows vulnerability trend in the build UI.
+                    post { always { dependencyCheckPublisher pattern: 'backend/reports/dependency-check-report.xml' } }
+                }
+                stage('SonarQube Analysis') {
+                    steps {
+                        dir('backend') {
+                            // runSonarScan → shared library function
+                            //   projectKey : must match a project in SonarQube
+                            //   Reads sonar-project.properties from the working dir
+                            runSonarScan(projectKey: env.BACKEND_SONAR_KEY)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ╔════════════════════════════════════════════════════════════════════╗
+        // ║   STAGE 3 — Frontend: SonarQube                                   ║
+        // ║   → Same as above but for the frontend (HTML/CSS/JS code)         ║
+        // ╚════════════════════════════════════════════════════════════════════╝
+        stage('CI — Frontend: SonarQube') {
+            steps {
+                dir('frontend') {
+                    runSonarScan(projectKey: env.FRONTEND_SONAR_KEY)
+                }
+            }
+        }
+
+        // ╔════════════════════════════════════════════════════════════════════╗
+        // ║   STAGE 4 — SonarQube Quality Gate                                ║
+        // ║   → Polls SonarQube until analysis is complete                    ║
+        // ║   → If Quality Gate fails (bugs/coverage below threshold),        ║
+        // ║     the pipeline ABORTS (abortPipeline: true)                     ║
+        // ║   → Timeout after 5 minutes (in case SonarQube is slow/down)      ║
+        // ╚════════════════════════════════════════════════════════════════════╝
+        stage('CI — SonarQube Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    // waitForQualityGate → shared library / Jenkins plugin
+                    // Blocks until SonarQube computes the gate result
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ╔════════════════════════════════════════════════════════════════════╗
+        // ║   STAGE 5 — Backend: Docker Build & Trivy Scan (parallel)         ║
+        // ║                                                                   ║
+        // ║   Docker Build:                                                   ║
+        // ║   → Builds the Flask API image from backend/Dockerfile            ║
+        // ║   → Tags it with the commit SHA (e.g. backend:a1b2c3d)            ║
+        // ║   → Image stays local — NOT pushed yet (that happens in CD)       ║
+        // ║                                                                   ║
+        // ║   Trivy Scan:                                                     ║
+        // ║   → Scans the built Docker image for OS/library CVEs              ║
+        // ║   → Archives the JSON report for later review                     ║
+        // ╚════════════════════════════════════════════════════════════════════╝
+        stage('CI — Backend: Build & Scan') {
+            parallel {
+                stage('Docker Build') {
+                    steps {
+                        script {
+                            // buildDockerImage → shared library function
+                            //   fullImage : name:tag for the image
+                            //   dockerfile : path relative to build context
+                            //   context    : docker build context directory
+                            buildDockerImage(
+                                fullImage: env.BACKEND_IMAGE,
+                                dockerfile: env.BACKEND_DOCKERFILE,
+                                context: env.BACKEND_BUILD_CONTEXT
+                            )
+                        }
+                    }
+                }
+                stage('Trivy Scan') {
+                    steps {
+                        // runTrivyScan → shared library function
+                        //   fullImage  : the image to scan (must exist locally)
+                        //   reportName : filename for the JSON output
+                        runTrivyScan(fullImage: env.BACKEND_IMAGE, reportName: 'backend-trivy-report.json')
+                    }
+                    // archiveArtifacts → Jenkins built-in: saves the report
+                    // as a build artifact so you can download it later.
+                    post { always { archiveArtifacts artifacts: 'backend-trivy-report.json', allowEmptyArchive: true } }
+                }
+            }
+        }
+
+        // ╔════════════════════════════════════════════════════════════════════╗
+        // ║   STAGE 6 — Frontend: Docker Build & Trivy Scan (parallel)        ║
+        // ║   → Same as Stage 5 but for the Nginx static site image           ║
+        // ╚════════════════════════════════════════════════════════════════════╝
+        stage('CI — Frontend: Build & Scan') {
+            parallel {
+                stage('Docker Build') {
+                    steps {
+                        script {
+                            buildDockerImage(
+                                fullImage: env.FRONTEND_IMAGE,
+                                dockerfile: env.FRONTEND_DOCKERFILE,
+                                context: env.FRONTEND_BUILD_CONTEXT
+                            )
+                        }
+                    }
+                }
+                stage('Trivy Scan') {
+                    steps {
+                        runTrivyScan(fullImage: env.FRONTEND_IMAGE, reportName: 'frontend-trivy-report.json')
+                    }
+                    post { always { archiveArtifacts artifacts: 'frontend-trivy-report.json', allowEmptyArchive: true } }
+                }
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  POST — runs after ALL stages complete (regardless of success/failure)
+    // ═════════════════════════════════════════════════════════════════════════
+    post {
+        // ─── ON SUCCESS ─────────────────────────────────────────────────────
+        // If CI passed AND we're on main/master/release branch:
+        //   → Trigger the CD pipeline (bushido-brand-CD)
+        //   → Pass commit SHA and image tags so CD doesn't recompute them
+        // Always send a Slack success notification.
+        success {
+            script {
+                // env.BRANCH_NAME → set by Jenkins based on the branch/tag built
+                // Regex check: only trigger CD for main, master, or release/* branches
+                if (env.BRANCH_NAME =~ /^(main|master|release\/.*)$/) {
+                    echo "CI passed on ${env.BRANCH_NAME} — triggering bushido-brand-CD..."
+
+                    // build job → Jenkins pipeline step: triggers another job
+                    //   job  : name of the Jenkins job to trigger
+                    //   parameters : key-value pairs passed to the downstream job
+                    //   wait : false means CI finishes without waiting for CD
+                    build job: 'bushido-brand-CD',
+                          parameters: [
+                              string(name: 'GIT_COMMIT_SHORT', value: env.GIT_COMMIT_SHORT),
+                              string(name: 'BACKEND_IMAGE',   value: env.BACKEND_IMAGE),
+                              string(name: 'FRONTEND_IMAGE',  value: env.FRONTEND_IMAGE)
+                          ],
+                          wait: false
+                }
+            }
+            // notifySlack → shared library function
+            // Posts a success/failure message to the #deployments Slack channel
+            notifySlack(
+                status: 'SUCCESS',
+                appName: 'Bushido Brand (CI)',
+                imageTag: env.GIT_COMMIT_SHORT,
+                channel: '#deployments'
+            )
+        }
+
+        // ─── ON FAILURE ─────────────────────────────────────────────────────
+        // Send a Slack failure notification with the commit SHA for debugging.
+        failure {
+            notifySlack(
+                status: 'FAILURE',
+                appName: 'Bushido Brand (CI)',
+                imageTag: env.GIT_COMMIT_SHORT,
+                channel: '#deployments'
+            )
+        }
+
+        // ─── ALWAYS (cleanup) ──────────────────────────────────────────────
+        // cleanWs → Jenkins Workspace Cleanup plugin: deletes all files
+        // on the agent to prevent disk filling up across builds.
+        always {
+            cleanWs()
+        }
+    }
+}
