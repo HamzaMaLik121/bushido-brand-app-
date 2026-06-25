@@ -10,9 +10,9 @@ metadata:
 spec:
   project: bushido-brand
   source:
-    repoURL: https://github.com/BushidoBrand/bushido-brand-gitops.git
+    repoURL: https://github.com/HamzaMaLik121/bushido-brand-app-.git
     targetRevision: main
-    path: charts/frontend
+    path: bushido-brand-pipeline/gitops-repo/charts/frontend
     helm:
       valueFiles:
         - values.yaml

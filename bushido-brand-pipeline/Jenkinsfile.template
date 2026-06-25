@@ -18,8 +18,8 @@
 buildPipeline(
   appName:         'YOUR_SERVICE_NAME',                          // e.g., 'backend' or 'frontend'
   dockerHubRepo:   'bushidobrand/YOUR_IMAGE_NAME',           // e.g., 'bushidobrand/bushido-brand-backend'
-  gitOpsRepo:      'github.com/BushidoBrand/bushido-brand-gitops.git',
-  helmValuePath:   'charts/YOUR_SERVICE_NAME/values.yaml',       // e.g., 'charts/backend/values.yaml'
+  gitOpsRepo:      'github.com/HamzaMaLik121/bushido-brand-app-.git',
+  helmValuePath:   'bushido-brand-pipeline/gitops-repo/charts/YOUR_SERVICE_NAME/values.yaml',       // e.g., 'bushido-brand-pipeline/gitops-repo/charts/backend/values.yaml'
   sonarProjectKey: 'bushido-brand-YOUR_SERVICE_NAME',                // e.g., 'bushido-brand-backend'
   argoApp:         'bushido-brand-YOUR_SERVICE_NAME',                // e.g., 'bushido-brand-backend'
 

@@ -6,7 +6,7 @@ metadata:
 spec:
   description: "bushido-brand application delivery space - managed via ArgoCD GitOps"
   sourceRepos:
-    - "https://github.com/BushidoBrand/bushido-brand-gitops.git"
+    - "https://github.com/HamzaMaLik121/bushido-brand-app-.git"
   destinations:
     - server: "https://kubernetes.default.svc"
       namespace: "bushido-brand"

@@ -30,7 +30,7 @@ pipeline {
         // ─── Backend ───────────────────────────────────────────────────────
         BACKEND_APP_NAME        = 'backend'
         BACKEND_DOCKER_REPO     = 'bushidobrand/bushido-brand-backend'
-        BACKEND_HELM_VALUE_PATH = 'charts/backend/values.yaml'
+        BACKEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/backend/values.yaml'
         BACKEND_SONAR_KEY       = 'bushido-brand-backend'
         BACKEND_ARGO_APP        = 'bushido-brand-backend'
         BACKEND_DOCKERFILE      = 'backend/Dockerfile'
@@ -40,7 +40,7 @@ pipeline {
         // ─── Frontend ──────────────────────────────────────────────────────
         FRONTEND_APP_NAME        = 'frontend'
         FRONTEND_DOCKER_REPO     = 'bushidobrand/bushido-brand-frontend'
-        FRONTEND_HELM_VALUE_PATH = 'charts/frontend/values.yaml'
+        FRONTEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/frontend/values.yaml'
         FRONTEND_SONAR_KEY       = 'bushido-brand-frontend'
         FRONTEND_ARGO_APP        = 'bushido-brand-frontend'
         FRONTEND_DOCKERFILE      = 'frontend/Dockerfile'
@@ -181,7 +181,7 @@ pipeline {
                 stage('Update Backend') {
                     steps {
                         updateGitOps(
-                            gitOpsRepo: 'github.com/BushidoBrand/bushido-brand-gitops.git',
+                            gitOpsRepo: 'github.com/HamzaMaLik121/bushido-brand-app-.git',
                             helmValuePath: env.BACKEND_HELM_VALUE_PATH,
                             imageTag: env.GIT_COMMIT_SHORT,
                             appName: env.BACKEND_APP_NAME,
@@ -192,7 +192,7 @@ pipeline {
                 stage('Update Frontend') {
                     steps {
                         updateGitOps(
-                            gitOpsRepo: 'github.com/BushidoBrand/bushido-brand-gitops.git',
+                            gitOpsRepo: 'github.com/HamzaMaLik121/bushido-brand-app-.git',
                             helmValuePath: env.FRONTEND_HELM_VALUE_PATH,
                             imageTag: env.GIT_COMMIT_SHORT,
                             appName: env.FRONTEND_APP_NAME,
