@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitleaks.toml — Bushido Brand secret-scanning config
+# ─────────────────────────────────────────────────────────────────────────────
+
+title = "Bushido Brand — Gitleaks Config"
+
+[allowlist]
+  description = "False-positive suppressions"
+  paths = [
+    "db/seed.sql",
+    "db/init.sql",
+    "package-lock.json",
+  ]
+  regexes = [
+    # Ignore obvious placeholder values
+    "password[\"']?\\s*[=:]\\s*[\"']?(changeme|placeholder|example|your_password|CHANGE_ME)[\"']?",
+    "secret[\"']?\\s*[=:]\\s*[\"']?(changeme|placeholder|example|your_secret|CHANGE_ME)[\"']?",
+  ]
+
+[[rules]]
+  id          = "jwt-token"
+  description = "Hardcoded JWT token"
+  regex       = '''eyJ[A-Za-z0-9_/+\-]{20,}\.eyJ[A-Za-z0-9_/+\-]{20,}\.[A-Za-z0-9_/+\-]{10,}'''
+  tags        = ["jwt", "secret"]
+
+[[rules]]
+  id          = "flask-secret-key"
+  description = "Hardcoded Flask SECRET_KEY"
+  regex       = '''SECRET_KEY\s*=\s*['"][^${\s]{8,}['"]'''
+  tags        = ["flask", "secret"]
+
+[[rules]]
+  id          = "mysql-inline-password"
+  description = "Hardcoded MySQL password in connection string"
+  regex       = '''mysql(\+pymysql)?://[^:]+:(?!os\.environ|getenv|\$\{)[^@\s]{6,}@'''
+  tags        = ["database", "mysql", "secret"]
+
+[[rules]]
+  id          = "docker-hub-token"
+  description = "Docker Hub personal access token"
+  regex       = '''dckr_pat_[A-Za-z0-9_\-]{20,}'''
+  tags        = ["docker", "token"]

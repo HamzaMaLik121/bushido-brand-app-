@@ -1,0 +1,13 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .trivyignore — Accepted / waived CVEs for Bushido Brand
+#
+# Format: one CVE-ID per line with a dated comment above it.
+# Every entry MUST have: date accepted + reason + review date (every 90 days).
+#
+# Example:
+# Accepted: 2025-01-15 | Review by: 2025-04-15
+# Reason: upstream patch not yet released; endpoint not externally reachable
+# CVE-2024-XXXXX
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Add real CVEs here only after security team sign-off

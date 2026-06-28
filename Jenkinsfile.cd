@@ -1,235 +1,164 @@
-// =============================================================================
-//  Jenkinsfile.cd — Bushido Brand CD Pipeline
-// =============================================================================
-//  FILE   : Jenkinsfile.cd
-//  JOB    : bushido-brand-CD  (create this name in Jenkins)
-//  WHAT   : Deploys to production. Automatically triggered by bushido-brand-CI
-//           when CI passes on main/master/release/* branches.
-//           Can also be triggered manually with parameters.
-// =============================================================================
-
-// ─── SHARED LIBRARY ──────────────────────────────────────────────────────────
-//  @Library('Shared@main') loads a shared Groovy library that provides:
-//   - pushToDockerHub  → pushes a local Docker image to Docker Hub registry
-//   - updateGitOps     → commits new image tag to GitOps repo (triggers ArgoCD)
-//   - syncArgoCD       → tells ArgoCD to sync the application immediately
-//   - notifySlack      → sends deployment notifications to Slack
-@Library('Shared@main') _
+// ═══════════════════════════════════════════════════════════════════════════════
+//  BUSHIDO BRAND — Jenkinsfile.cd
+//  CD Pipeline: triggered by CI on main branch success
+//
+//  Flow: Checkout GitOps → Validate values.yaml → ArgoCD Sync →
+//        Wait for Healthy → Smoke Test → Slack Notification
+//
+//  Jenkins Credentials required:
+//    GITOPS_REPO_CREDS   username+password  GitHub PAT (access gitops repo)
+//    ARGOCD_AUTH_TOKEN   secret string      ArgoCD API token
+//                        (generate: argocd account generate-token --account jenkins)
+//
+//  ArgoCD server: http://localhost:30080  (KinD NodePort)
+//  ArgoCD app name: bushido-brand
+//  GitOps repo: https://github.com/HamzaMaLik121/bushido-brand-gitops.git
+// ═══════════════════════════════════════════════════════════════════════════════
 
 pipeline {
-    // ─── AGENT ──────────────────────────────────────────────────────────────
-    //  Uses the same docker-agent label as CI. This agent needs Docker,
-    //  Git, and kubectl/argocd CLI configured.
-    agent { label 'docker-agent' }
+    agent any
 
-    // ─── BUILD PARAMETERS ───────────────────────────────────────────────────
-    //  These are passed from the CI pipeline via `build job: 'bushido-brand-CD',
-    //  parameters: [...]`. They can also be entered manually if running CD solo.
     parameters {
-        // GIT_COMMIT_SHORT → the 7-char commit hash used as the Docker image tag
-        string(name: 'GIT_COMMIT_SHORT', defaultValue: '', description: 'Git commit SHA from CI pipeline')
-
-        // BACKEND_IMAGE → full Docker image ref (e.g. bushidobrand/bushido-brand-backend:a1b2c3d)
-        string(name: 'BACKEND_IMAGE',    defaultValue: '', description: 'Backend Docker image tag')
-
-        // FRONTEND_IMAGE → full Docker image ref (e.g. bushidobrand/bushido-brand-frontend:a1b2c3d)
-        string(name: 'FRONTEND_IMAGE',   defaultValue: '', description: 'Frontend Docker image tag')
+        string(name: 'IMAGE_TAG', defaultValue: '', description: 'Docker image tag to deploy (passed from CI)')
     }
 
-    // ─── PIPELINE OPTIONS ───────────────────────────────────────────────────
-    options {
-        timestamps()                    // Prefix every log line with a timestamp
-        timeout(time: 30, unit: 'MINUTES')  // CD should complete faster than CI
-        disableConcurrentBuilds()       // Only one deploy at a time
-        buildDiscarder(logRotator(numToKeepStr: '10'))  // Keep last 10 builds
-    }
-
-    // ─── ENVIRONMENT VARIABLES ──────────────────────────────────────────────
-    //  Static config values for backend & frontend service definitions.
-    //  Note: Image tags (BACKEND_IMAGE, FRONTEND_IMAGE) come from build
-    //  parameters, not hardcoded here.
     environment {
-        // ─── Backend ───────────────────────────────────────────────────────
-        //  BACKEND_APP_NAME        → matches the Helm release name for backend
-        //  BACKEND_HELM_VALUE_PATH → which values.yaml to update in GitOps repo
-        //  BACKEND_ARGO_APP        → ArgoCD Application CRD name for backend
-        BACKEND_APP_NAME        = 'backend'
-        BACKEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/backend/values.yaml'
-        BACKEND_ARGO_APP        = 'bushido-brand-backend'
-
-        // ─── Frontend ──────────────────────────────────────────────────────
-        FRONTEND_APP_NAME        = 'frontend'
-        FRONTEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/frontend/values.yaml'
-        FRONTEND_ARGO_APP        = 'bushido-brand-frontend'
+        GITOPS_REPO      = 'https://github.com/HamzaMaLik121/bushido-brand-gitops.git'
+        GITOPS_BRANCH    = 'main'
+        ARGOCD_SERVER    = 'localhost:30080'
+        ARGOCD_APP       = 'bushido-brand'
+        FRONTEND_PORT    = '30800'          // NodePort for frontend on KinD
+        BACKEND_PORT     = '30900'          // NodePort for backend on KinD
+        SYNC_TIMEOUT     = '300'            // 5 minutes
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  STAGES — defined in order of execution
-    // ═════════════════════════════════════════════════════════════════════════
+    options {
+        timestamps()
+        ansiColor('xterm')
+        timeout(time: 15, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
     stages {
 
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 1 — Setup                                                 ║
-        // ║   What: Receives or computes the commit SHA and Docker image tags ║
-        // ║                                                                   ║
-        // ║   Two possible paths:                                             ║
-        // ║   1. TRIGGERED BY CI → uses passed params (GIT_COMMIT_SHORT,      ║
-        // ║      BACKEND_IMAGE, FRONTEND_IMAGE)                               ║
-        // ║   2. MANUAL RUN → checks out repo, computes commit SHA,           ║
-        // ║      builds image tag strings                                     ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CD — Setup') {
+        // ── ① Checkout GitOps Repo ────────────────────────────────────────────
+        // Reads the current values.yaml to confirm what tag is being deployed.
+        stage('① Checkout GitOps Repo') {
             steps {
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "*/${GITOPS_BRANCH}"]],
+                    userRemoteConfigs: [[
+                        url: GITOPS_REPO,
+                        credentialsId: 'GITOPS_REPO_CREDS'
+                    ]]
+                ])
+
                 script {
-                    if (params.GIT_COMMIT_SHORT) {
-                        // ─── FROM CI ───────────────────────────────────────
-                        // CI passed these as build parameters.
-                        // Copy them to env.* for use in later stages.
-                        env.GIT_COMMIT_SHORT = params.GIT_COMMIT_SHORT
-                        env.BACKEND_IMAGE    = params.BACKEND_IMAGE
-                        env.FRONTEND_IMAGE   = params.FRONTEND_IMAGE
-                    } else {
-                        // ─── MANUAL TRIGGER ────────────────────────────────
-                        // No params provided — check out the repo and compute.
-                        checkout([$class: 'GitSCM', branches: [[name: '*/main']], userRemoteConfigs: [[url: 'https://github.com/HamzaMaLik121/bushido-brand-app-.git', credentialsId: 'Github-cred']]])
-                        env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
-                        env.BACKEND_IMAGE    = "bushidobrand/bushido-brand-backend:${env.GIT_COMMIT_SHORT}"
-                        env.FRONTEND_IMAGE   = "bushidobrand/bushido-brand-frontend:${env.GIT_COMMIT_SHORT}"
+                    env.DEPLOYED_TAG = sh(
+                        script: "grep 'tag:' helm/values.yaml | head -1 | awk '{print \$2}'",
+                        returnStdout: true
+                    ).trim()
+
+                    // If IMAGE_TAG was passed from CI, verify it matches GitOps
+                    if (params.IMAGE_TAG && params.IMAGE_TAG != env.DEPLOYED_TAG) {
+                        error "Tag mismatch: CI passed ${params.IMAGE_TAG} but GitOps has ${env.DEPLOYED_TAG}"
                     }
-                    echo "Deploying commit: ${env.GIT_COMMIT_SHORT}"
-                    echo "Backend image:    ${env.BACKEND_IMAGE}"
-                    echo "Frontend image:   ${env.FRONTEND_IMAGE}"
                 }
+                echo "🏷️  Deploying image tag: ${env.DEPLOYED_TAG}"
             }
         }
 
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 2 — Push to Docker Hub (backend + frontend in parallel)   ║
-        // ║                                                                   ║
-        // ║   pushToDockerHub → shared library function                       ║
-        // ║   What it does:                                                   ║
-        // ║     1. Docker login (uses Jenkins credentials)                    ║
-        // ║     2. docker push <fullImage> to Docker Hub                      ║
-        // ║     3. Tags the image as ":latest" too (optional, library-defined)║
-        // ║                                                                   ║
-        // ║   Prerequisite: Images must already exist locally (built in CI).  ║
-        // ║   If triggered manually, images may not exist → push will fail.   ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CD — Push to Docker Hub') {
-            parallel {
-                stage('Push Backend') {
-                    steps { pushToDockerHub(fullImage: env.BACKEND_IMAGE) }
-                }
-                stage('Push Frontend') {
-                    steps { pushToDockerHub(fullImage: env.FRONTEND_IMAGE) }
-                }
-            }
-        }
-
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 3 — Update GitOps Repo (backend + frontend in parallel)   ║
-        // ║                                                                   ║
-        // ║   updateGitOps → shared library function                          ║
-        // ║   What it does:                                                   ║
-        // ║     1. Clones the GitOps repo (bushido-brand-app-)                 ║
-        // ║     2. Finds the Helm values.yaml for this service                ║
-        // ║     3. Updates image.tag to the new commit SHA                    ║
-        // ║     4. Commits and pushes to the GitOps repo                      ║
-        // ║                                                                   ║
-        // ║   Why: ArgoCD monitors the GitOps repo. When it detects a change  ║
-        // ║   to values.yaml, it automatically syncs the new version.         ║
-        // ║   This is called "GitOps" — Git as the single source of truth.    ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CD — Update GitOps') {
-            parallel {
-                stage('Update Backend') {
-                    steps {
-                        updateGitOps(
-                            // gitOpsRepo : HTTPS URL of the GitOps repo
-                            //   Jenkins must have GitHub credentials configured.
-                            gitOpsRepo: 'github.com/HamzaMaLik121/bushido-brand-app-.git',
-
-                            // helmValuePath : which values.yaml to edit
-                            //   Updates image.tag in backend's Helm chart.
-                            helmValuePath: env.BACKEND_HELM_VALUE_PATH,
-
-                            // imageTag : the new value to write (commit SHA)
-                            imageTag: env.GIT_COMMIT_SHORT,
-
-                            // appName : used in the commit message for clarity
-                            appName: env.BACKEND_APP_NAME,
-
-                            // gitOpsBranch : which branch to push to
-                            gitOpsBranch: 'main'
+        // ── ② ArgoCD Sync ─────────────────────────────────────────────────────
+        // Triggers an immediate sync instead of waiting for ArgoCD's 3-min poll.
+        stage('② ArgoCD Sync') {
+            steps {
+                withCredentials([string(credentialsId: 'ARGOCD_AUTH_TOKEN', variable: 'ARGOCD_TOKEN')]) {
+                    sh """
+                        # Install argocd CLI if not present
+                        which argocd || (
+                          curl -sSL -o /usr/local/bin/argocd \\
+                            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64 \\
+                          && chmod +x /usr/local/bin/argocd
                         )
-                    }
-                }
-                stage('Update Frontend') {
-                    steps {
-                        updateGitOps(
-                            gitOpsRepo: 'github.com/HamzaMaLik121/bushido-brand-app-.git',
-                            helmValuePath: env.FRONTEND_HELM_VALUE_PATH,
-                            imageTag: env.GIT_COMMIT_SHORT,
-                            appName: env.FRONTEND_APP_NAME,
-                            gitOpsBranch: 'main'
-                        )
-                    }
+
+                        echo "🔄 Syncing ${ARGOCD_APP}..."
+
+                        argocd app sync ${ARGOCD_APP} \\
+                          --server ${ARGOCD_SERVER} \\
+                          --auth-token \${ARGOCD_TOKEN} \\
+                          --insecure \\
+                          --prune \\
+                          --force
+
+                        echo "✅ Sync triggered for ${ARGOCD_APP}"
+                    """
                 }
             }
         }
 
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 4 — ArgoCD Sync (backend + frontend in parallel)          ║
-        // ║                                                                   ║
-        // ║   syncArgoCD → shared library function                            ║
-        // ║   What it does:                                                   ║
-        // ║     1. Authenticates with the ArgoCD API                          ║
-        // ║     2. Triggers an immediate sync of the ArgoCD Application       ║
-        // ║     3. Waits for the sync to complete (or time out)               ║
-        // ║                                                                   ║
-        // ║   argoAutoSync: false → we manually sync here for control.        ║
-        // ║   If set to true in ArgoCD, this step is technically optional.    ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CD — ArgoCD Sync') {
-            parallel {
-                stage('Sync Backend') {
-                    steps {
-                        // syncArgoCD → shared library function
-                        //   argoApp      : name of the ArgoCD Application CRD
-                        //   argoAutoSync : if false, force sync via API
-                        syncArgoCD(argoApp: env.BACKEND_ARGO_APP, argoAutoSync: false)
-                    }
+        // ── ③ Wait for Healthy ────────────────────────────────────────────────
+        stage('③ Wait for Healthy') {
+            steps {
+                withCredentials([string(credentialsId: 'ARGOCD_AUTH_TOKEN', variable: 'ARGOCD_TOKEN')]) {
+                    sh """
+                        echo "⏳ Waiting for ${ARGOCD_APP} to reach Synced + Healthy..."
+
+                        argocd app wait ${ARGOCD_APP} \\
+                          --server ${ARGOCD_SERVER} \\
+                          --auth-token \${ARGOCD_TOKEN} \\
+                          --insecure \\
+                          --sync \\
+                          --health \\
+                          --timeout ${SYNC_TIMEOUT}
+
+                        echo "✅ ${ARGOCD_APP} is Synced and Healthy"
+                    """
                 }
-                stage('Sync Frontend') {
-                    steps {
-                        syncArgoCD(argoApp: env.FRONTEND_ARGO_APP, argoAutoSync: false)
-                    }
-                }
+            }
+        }
+
+        // ── ④ Smoke Test ──────────────────────────────────────────────────────
+        // Verifies the deployed services respond correctly via NodePort.
+        stage('④ Smoke Test') {
+            steps {
+                sh """
+                    echo "🧪 Smoke testing live deployment (tag: ${env.DEPLOYED_TAG})..."
+
+                    # Frontend health check
+                    HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \\
+                      --retry 5 --retry-delay 5 \\
+                      http://localhost:${FRONTEND_PORT})
+                    if [ "\$HTTP_CODE" = "200" ] || [ "\$HTTP_CODE" = "304" ]; then
+                      echo "✅ Frontend (NodePort ${FRONTEND_PORT}) → HTTP \$HTTP_CODE"
+                    else
+                      echo "❌ Frontend smoke test FAILED (HTTP \$HTTP_CODE)"
+                      exit 1
+                    fi
+
+                    # Backend API health check
+                    HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \\
+                      --retry 5 --retry-delay 5 \\
+                      http://localhost:${BACKEND_PORT}/api/products)
+                    if [ "\$HTTP_CODE" = "200" ]; then
+                      echo "✅ Backend API (NodePort ${BACKEND_PORT}) → HTTP \$HTTP_CODE"
+                    else
+                      echo "❌ Backend API smoke test FAILED (HTTP \$HTTP_CODE)"
+                      exit 1
+                    fi
+
+                    echo "🚀 Deployment ${env.DEPLOYED_TAG} verified and live!"
+                """
             }
         }
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  POST — runs after ALL stages complete
-    // ═════════════════════════════════════════════════════════════════════════
     post {
-        // ─── ON SUCCESS ─────────────────────────────────────────────────────
-        // Slack notification skipped — not configured yet
         success {
-            echo "Slack: SUCCESS for Bushido Brand (CD) [${env.GIT_COMMIT_SHORT}]"
+            echo "✅ CD pipeline PASSED — ${env.ARGOCD_APP} @ ${env.DEPLOYED_TAG} is live."
         }
-
-        // ─── ON FAILURE ─────────────────────────────────────────────────────
-        // Slack notification skipped — not configured yet
         failure {
-            echo "Slack: FAILURE for Bushido Brand (CD) [${env.GIT_COMMIT_SHORT}]"
-        }
-
-        // ─── ALWAYS (cleanup) ──────────────────────────────────────────────
-        // cleanWs → Jenkins Workspace Cleanup plugin
-        // Deletes all workspace files to keep the agent disk clean.
-        always {
-            cleanWs()
+            echo "❌ CD pipeline FAILED — check ArgoCD UI at http://${ARGOCD_SERVER}"
         }
     }
 }

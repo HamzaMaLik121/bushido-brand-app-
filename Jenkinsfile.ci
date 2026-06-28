@@ -1,291 +1,477 @@
-// =============================================================================
-//  Jenkinsfile.ci — Bushido Brand CI Pipeline
-// =============================================================================
-//  FILE   : Jenkinsfile.ci
-//  JOB    : bushido-brand-CI  (create this name in Jenkins)
-//  WHAT   : Runs CI checks on EVERY branch push. If main/master/release/*
-//           passes, automatically triggers the CD job (bushido-brand-CD).
-// =============================================================================
-
-// ─── SHARED LIBRARY ──────────────────────────────────────────────────────────
-//  @Library('Shared@main') loads a shared Groovy library from a separate Git
-//  repo (configured in Jenkins under "Global Pipeline Libraries").
-//  This library provides the custom functions used below (runOwaspCheck,
-//  runSonarScan, waitForQualityGate, buildDockerImage, runTrivyScan,  //  pushToDockerHub, updateGitOps, syncArgoCD, notifySlack).
-@Library('Shared@main') _
+// ═══════════════════════════════════════════════════════════════════════════════
+//  BUSHIDO BRAND — Jenkinsfile.ci
+//  Full Production CI Pipeline
+//
+//  Flow: Checkout → Secret Scan → SAST (Bandit + Semgrep + SonarQube)
+//        → Dependency Scan (pip-audit + OWASP Dep-Check)
+//        → Build Images → Trivy Image Scan
+//        → Integration Spin-Up → Health Checks → DAST (OWASP ZAP)
+//        → Push to Docker Hub → Update GitOps values.yaml
+//
+//  Triggers CD pipeline (Jenkinsfile.cd) on success.
+//
+//  Jenkins Credentials required:
+//    docker-hub-creds       username+password  Docker Hub push
+//    BUSHIDO_DB_PASSWORD    secret string      MySQL password
+//    BUSHIDO_JWT_SECRET     secret string      Flask JWT secret
+//    GITOPS_REPO_CREDS      username+password  GitHub PAT (push to gitops repo)
+//    SONAR_TOKEN            secret string      SonarQube token
+//
+//  Jenkins Plugins required:
+//    SonarQube Scanner, Dependency-Check, HTML Publisher, AnsiColor
+// ═══════════════════════════════════════════════════════════════════════════════
 
 pipeline {
-    // ─── AGENT ──────────────────────────────────────────────────────────────
-    //  Runs on any Jenkins node that has the label 'docker-agent'. This agent
-    //  must have Docker, Git, and any required CLI tools installed.
-    agent { label 'docker-agent' }
+    agent any
 
-    // ─── PIPELINE OPTIONS ───────────────────────────────────────────────────
-    options {
-        timestamps()                    // Prefix every log line with a timestamp
-        timeout(time: 60, unit: 'MINUTES')  // Kill pipeline if it runs >60 min
-        disableConcurrentBuilds()       // Only one build at a time per branch
-        buildDiscarder(logRotator(numToKeepStr: '10'))  // Keep only last 10 builds
-    }
-
-    // ─── ENVIRONMENT VARIABLES ──────────────────────────────────────────────
-    //  These are available in all stages/steps. They configure paths, names,
-    //  and Docker image references for both backend and frontend.
     environment {
+        DOCKER_HUB_USER    = 'hamzamalik121'
+        GITOPS_REPO        = 'https://github.com/HamzaMaLik121/bushido-brand-gitops.git'
+        GITOPS_BRANCH      = 'main'
+        REPORTS            = 'security-reports'
+        TRIVY_CACHE        = '/tmp/trivy-cache'
+        DC_DATA            = '/tmp/dep-check-data'
 
-        // ─── Backend ───────────────────────────────────────────────────────
-        //  BACKEND_APP_NAME        → service name, used in Helm & ArgoCD
-        //  BACKEND_DOCKER_REPO     → Docker Hub repo for the backend image
-        //  BACKEND_HELM_VALUE_PATH → which Helm values.yaml to update in GitOps
-        //  BACKEND_SONAR_KEY       → SonarQube project key for backend analysis
-        //  BACKEND_ARGO_APP        → ArgoCD Application CRD name for backend
-        //  BACKEND_DOCKERFILE      → path to Dockerfile (relative to repo root)
-        //  BACKEND_BUILD_CONTEXT   → docker build context directory
-        //  Note: BACKEND_IMAGE is NOT declared here — it's set at runtime in the checkout stage
-        BACKEND_APP_NAME        = 'backend'
-        BACKEND_DOCKER_REPO     = 'bushidobrand/bushido-brand-backend'
-        BACKEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/backend/values.yaml'
-        BACKEND_SONAR_KEY       = 'bushido-brand-backend'
-        BACKEND_ARGO_APP        = 'bushido-brand-backend'
-        BACKEND_DOCKERFILE      = 'backend/Dockerfile'
-        BACKEND_BUILD_CONTEXT   = 'backend'
-
-        // ─── Frontend ──────────────────────────────────────────────────────
-        //  (Same pattern as backend above but for the frontend Nginx service)
-        //  Note: FRONTEND_IMAGE is NOT declared here — it's set at runtime in the checkout stage
-        FRONTEND_APP_NAME        = 'frontend'
-        FRONTEND_DOCKER_REPO     = 'bushidobrand/bushido-brand-frontend'
-        FRONTEND_HELM_VALUE_PATH = 'bushido-brand-pipeline/gitops-repo/charts/frontend/values.yaml'
-        FRONTEND_SONAR_KEY       = 'bushido-brand-frontend'
-        FRONTEND_ARGO_APP        = 'bushido-brand-frontend'
-        FRONTEND_DOCKERFILE      = 'frontend/Dockerfile'
-        FRONTEND_BUILD_CONTEXT   = 'frontend'
+        // SonarQube
+        SONAR_HOST_URL     = 'http://sonarqube:9000'    // change to your SonarQube server
+        SONAR_BACKEND_KEY  = 'bushido-brand-backend'
+        SONAR_FRONTEND_KEY = 'bushido-brand-frontend'
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  STAGES — defined in order of execution
-    // ═════════════════════════════════════════════════════════════════════════
+    options {
+        timestamps()
+        ansiColor('xterm')
+        timeout(time: 75, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+    }
+
     stages {
 
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 1 — Checkout                                             ║
-        // ║   What: Clones the repo, computes short SHA, builds image tags    ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CI — Checkout') {
+        // ── ① Checkout ────────────────────────────────────────────────────────
+        stage('① Checkout') {
             steps {
+                checkout scm
                 script {
-                    // Explicit git checkout with GitHub credentials
-                    checkout([$class: 'GitSCM', branches: [[name: '*/main']], userRemoteConfigs: [[url: 'https://github.com/HamzaMaLik121/bushido-brand-app-.git', credentialsId: 'Github-cred']]])
-
-                    // Get commit SHA from the workspace (with ||true to handle non-zero exit)
-                    env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short HEAD 2>/dev/null || true').trim()
-                    if (!env.GIT_COMMIT_SHORT) env.GIT_COMMIT_SHORT = 'unknown'
-
-                    // Build full Docker image references
-                    env.BACKEND_IMAGE  = "${env.BACKEND_DOCKER_REPO}:${env.GIT_COMMIT_SHORT}"
-                    env.FRONTEND_IMAGE = "${env.FRONTEND_DOCKER_REPO}:${env.GIT_COMMIT_SHORT}"
-
-                    echo "Commit: ${GIT_COMMIT_SHORT}"
-                    echo "Backend image:  ${env.BACKEND_IMAGE}"
-                    echo "Frontend image: ${env.FRONTEND_IMAGE}"
+                    env.SHORT_SHA      = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG      = "${BUILD_NUMBER}-${env.SHORT_SHA}"
+                    env.FRONTEND_IMAGE = "${DOCKER_HUB_USER}/bushido-frontend"
+                    env.BACKEND_IMAGE  = "${DOCKER_HUB_USER}/bushido-backend"
                 }
+                sh """
+                    mkdir -p ${REPORTS} ${TRIVY_CACHE} ${DC_DATA}
+                    echo "🏷️  Tag      : ${env.IMAGE_TAG}"
+                    echo "📦 Frontend : ${env.FRONTEND_IMAGE}:${env.IMAGE_TAG}"
+                    echo "⚙️  Backend  : ${env.BACKEND_IMAGE}:${env.IMAGE_TAG}"
+                """
             }
         }
 
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 2 — Backend: OWASP & SonarQube (runs in parallel)         ║
-        // ║   These stages check if the required tools are available before    ║
-        // ║   running. If tools aren't installed, the stage is gracefully      ║
-        // ║   skipped to avoid UNSTABLE results.                              ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CI — Backend: OWASP & SonarQube') {
-            parallel {
-                stage('OWASP Dependency Check') {
-                    steps {
-                        dir('backend') {
-                            script {
-                                def owaspAvailable = sh(returnStatus: true, script: 'which dependency-check.sh 2>/dev/null || which dependency-check 2>/dev/null') == 0
-                                if (owaspAvailable) {
-                                    runOwaspCheck(
-                                        appName: 'bushido-brand-backend',
-                                        suppressionPath: '../devsecops/owasp/suppressions.xml'
-                                    )
-                                } else {
-                                    echo 'OWASP Dependency-Check tool not available - skipping'
-                                }
-                            }
-                        }
-                    }
-                    post { always { catchError(buildResult: 'SUCCESS') { dependencyCheckPublisher pattern: 'backend/reports/dependency-check-report.xml' } } }
-                }
-                stage('Frontend: SonarQube Analysis') {
-                    steps {
-                        dir('backend') {
-                            script {
-                                def sonarAvailable = sh(returnStatus: true, script: 'which sonar-scanner 2>/dev/null') == 0
-                                if (sonarAvailable) {
-                                    runSonarScan(projectKey: env.BACKEND_SONAR_KEY)
-                                } else {
-                                    echo 'SonarQube scanner not available - skipping backend analysis'
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 3 — Frontend: SonarQube (skipped if tool unavailable)     ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CI — Frontend: SonarQube') {
+        // ── ② Secret Scan — Gitleaks ──────────────────────────────────────────
+        stage('② Secret Scan — Gitleaks') {
             steps {
-                dir('frontend') {
-                    script {
-                        def sonarAvailable = sh(returnStatus: true, script: 'which sonar-scanner 2>/dev/null') == 0
-                        if (sonarAvailable) {
-                            runSonarScan(projectKey: env.FRONTEND_SONAR_KEY)
-                        } else {
-                            echo 'SonarQube scanner not available - skipping frontend analysis'
-                        }
-                    }
-                }
+                sh """
+                    docker run --rm \\
+                      -v "\${WORKSPACE}:/repo" \\
+                      zricethezav/gitleaks:latest \\
+                        detect \\
+                        --source /repo \\
+                        --config /repo/.gitleaks.toml \\
+                        --report-format json \\
+                        --report-path /repo/${REPORTS}/gitleaks.json \\
+                        --no-git \\
+                        --exit-code 1
+                """
+            }
+            post {
+                failure { error '🔑 Secrets found in source — fix before proceeding.' }
+                always  { archiveArtifacts artifacts: "${REPORTS}/gitleaks.json", allowEmptyArchive: true }
             }
         }
 
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 4 — SonarQube Quality Gate (skipped if SQ not configured) ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CI — SonarQube Quality Gate') {
-            steps {
-                script {
-                    def sonarAvailable = sh(returnStatus: true, script: 'which sonar-scanner 2>/dev/null') == 0
-                    if (sonarAvailable) {
-                        timeout(time: 1, unit: 'MINUTES') {
-                            waitForQualityGate abortPipeline: false
-                        }
-                    } else {
-                        echo 'SonarQube scanner not configured - skipping quality gate'
-                    }
-                }
-            }
-        }
-
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 5 — Backend: Docker Build & Trivy Scan (parallel)         ║
-        // ║                                                                   ║
-        // ║   Docker Build:                                                   ║
-        // ║   → Builds the Flask API image from backend/Dockerfile            ║
-        // ║   → Tags it with the commit SHA (e.g. backend:a1b2c3d)            ║
-        // ║   → Image stays local — NOT pushed yet (that happens in CD)       ║
-        // ║                                                                   ║
-        // ║   Trivy Scan:                                                     ║
-        // ║   → Scans the built Docker image for OS/library CVEs              ║
-        // ║   → Archives the JSON report for later review                     ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CI — Backend: Build & Scan') {
+        // ── ③ SAST — Static Analysis ─────────────────────────────────────────
+        stage('③ SAST') {
             parallel {
-                stage('Docker Build') {
+                stage('Bandit — Python SAST') {
                     steps {
-                        script {
-                            container('dind') {
+                        sh """
+                            docker run --rm \\
+                              -v "\${WORKSPACE}/backend:/app" \\
+                              python:3.11-slim \\
+                                sh -c "pip install bandit -q && \\
+                                       bandit -r /app/src \\
+                                              -c /app/bandit.yaml \\
+                                              -f json \\
+                                              -o /app/bandit-report.json \\
+                                              --severity-level medium \\
+                                              --exit-zero"
+                            cp backend/bandit-report.json ${REPORTS}/
+                        """
+                    }
+                    post { always { archiveArtifacts artifacts: "${REPORTS}/bandit-report.json", allowEmptyArchive: true } }
+                }
+                stage('Semgrep — OWASP + Lang Security') {
+                    steps {
+                        sh """
+                            docker run --rm \\
+                              -v "\${WORKSPACE}:/src" \\
+                              semgrep/semgrep:latest \\
+                                semgrep scan \\
+                                  --config p/python \\
+                                  --config p/flask \\
+                                  --config p/javascript \\
+                                  --config p/owasp-top-ten \\
+                                  --config p/secrets \\
+                                  --json \\
+                                  --output /src/${REPORTS}/semgrep.json \\
+                                  /src || true
+                        """
+                    }
+                    post { always { archiveArtifacts artifacts: "${REPORTS}/semgrep.json", allowEmptyArchive: true } }
+                }
+                stage('SonarQube — Backend') {
+                    steps {
+                        withSonarQubeEnv('SonarQube') {
+                            withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
                                 sh """
-                                    echo 'Waiting for Docker daemon...'
-                                    for i in \$(seq 1 10); do
-                                        docker info > /dev/null 2>&1 && echo 'Docker ready!' && break
-                                        echo "Attempt \$i: Docker not ready yet, waiting..."
-                                        sleep 3
-                                    done
-                                    docker build -t ${env.BACKEND_IMAGE} -f ${env.BACKEND_DOCKERFILE} ${env.BACKEND_BUILD_CONTEXT} || echo 'Docker build completed (or skipped)'
+                                    docker run --rm \\
+                                      -v "\${WORKSPACE}/backend:/usr/src" \\
+                                      -w /usr/src \\
+                                      sonarsource/sonar-scanner-cli:latest \\
+                                        -Dsonar.host.url=${SONAR_HOST_URL} \\
+                                        -Dsonar.login=\${SONAR_TOKEN} \\
+                                        -Dsonar.projectKey=${SONAR_BACKEND_KEY} \\
+                                        -Dsonar.sources=. \\
+                                        -Dsonar.exclusions=**/__pycache__/**,**/.venv/** \\
+                                        -Dsonar.python.version=3.11 \\
+                                        -Dsonar.sourceEncoding=UTF-8
                                 """
                             }
                         }
                     }
                 }
-                stage('Trivy Scan') {
+                stage('SonarQube — Frontend') {
                     steps {
-                        container('dind') {
-                            sh "docker save -o backend-image.tar ${env.BACKEND_IMAGE} || echo 'Image save skipped'"
-                        }
-                        container('trivy') {
-                            sh "trivy image --input backend-image.tar --format json -o backend-trivy-report.json || echo 'Trivy scan completed (or skipped)'"
-                        }
-                    }
-                    post { always { catchError(buildResult: 'SUCCESS') { archiveArtifacts artifacts: 'backend-trivy-report.json', allowEmptyArchive: true } } }
-                }
-            }
-        }
-
-        // ╔════════════════════════════════════════════════════════════════════╗
-        // ║   STAGE 6 — Frontend: Docker Build & Trivy Scan (parallel)        ║
-        // ║   → Same as Stage 5 but for the Nginx static site image           ║
-        // ╚════════════════════════════════════════════════════════════════════╝
-        stage('CI — Frontend: Build & Scan') {
-            parallel {
-                stage('Docker Build') {
-                    steps {
-                        script {
-                            container('dind') {
+                        withSonarQubeEnv('SonarQube') {
+                            withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
                                 sh """
-                                    echo 'Waiting for Docker daemon...'
-                                    for i in \$(seq 1 10); do
-                                        docker info > /dev/null 2>&1 && echo 'Docker ready!' && break
-                                        echo "Attempt \$i: Docker not ready yet, waiting..."
-                                        sleep 3
-                                    done
-                                    docker build -t ${env.FRONTEND_IMAGE} -f ${env.FRONTEND_DOCKERFILE} ${env.FRONTEND_BUILD_CONTEXT} || echo 'Docker build completed (or skipped)'
+                                    docker run --rm \\
+                                      -v "\${WORKSPACE}/frontend:/usr/src" \\
+                                      -w /usr/src \\
+                                      sonarsource/sonar-scanner-cli:latest \\
+                                        -Dsonar.host.url=${SONAR_HOST_URL} \\
+                                        -Dsonar.login=\${SONAR_TOKEN} \\
+                                        -Dsonar.projectKey=${SONAR_FRONTEND_KEY} \\
+                                        -Dsonar.sources=. \\
+                                        -Dsonar.sourceEncoding=UTF-8
                                 """
                             }
                         }
                     }
                 }
-                stage('Trivy Scan') {
-                    steps {
-                        container('dind') {
-                            sh "docker save -o frontend-image.tar ${env.FRONTEND_IMAGE} || echo 'Image save skipped'"
-                        }
-                        container('trivy') {
-                            sh "trivy image --input frontend-image.tar --format json -o frontend-trivy-report.json || echo 'Trivy scan completed (or skipped)'"
-                        }
-                    }
-                    post { always { catchError(buildResult: 'SUCCESS') { archiveArtifacts artifacts: 'frontend-trivy-report.json', allowEmptyArchive: true } } }
+            }
+        }
+
+        // ── ④ SonarQube Quality Gate ─────────────────────────────────────────
+        stage('④ SonarQube Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
+            }
+        }
+
+        // ── ⑤ Dependency Scan ────────────────────────────────────────────────
+        stage('⑤ Dependency Scan') {
+            parallel {
+                stage('pip-audit — Python Dependencies') {
+                    steps {
+                        sh """
+                            docker run --rm \\
+                              -v "\${WORKSPACE}/backend:/app" \\
+                              python:3.11-slim \\
+                                sh -c "pip install pip-audit -q && \\
+                                       pip-audit \\
+                                         -r /app/requirements.txt \\
+                                         --format json \\
+                                         -o /app/pip-audit.json \\
+                                         --desc || true"
+                            cp backend/pip-audit.json ${REPORTS}/
+                        """
+                    }
+                    post { always { archiveArtifacts artifacts: "${REPORTS}/pip-audit.json", allowEmptyArchive: true } }
+                }
+                stage('OWASP Dependency-Check — SCA') {
+                    steps {
+                        sh """
+                            docker run --rm \\
+                              -v "\${WORKSPACE}:/src" \\
+                              -v "\${WORKSPACE}/${REPORTS}:/report" \\
+                              -v "${DC_DATA}:/usr/share/dependency-check/data" \\
+                              owasp/dependency-check:latest \\
+                                --scan /src/backend \\
+                                --format JSON \\
+                                --out /report \\
+                                --project "bushido-backend" \\
+                                --disableAssembly || true
+                        """
+                    }
+                    post { always { archiveArtifacts artifacts: "${REPORTS}/dependency-check-report.json", allowEmptyArchive: true } }
+                }
+            }
+        }
+
+        // ── ⑥ Build Images ──────────────────────────────────────────────────
+        stage('⑥ Build Images') {
+            parallel {
+                stage('Build Frontend') {
+                    steps {
+                        sh """
+                            docker build \\
+                              -t ${env.FRONTEND_IMAGE}:${env.IMAGE_TAG} \\
+                              -t ${env.FRONTEND_IMAGE}:latest \\
+                              --label "git.commit=${env.SHORT_SHA}" \\
+                              --label "build.number=${BUILD_NUMBER}" \\
+                              -f frontend/Dockerfile \\
+                              frontend/
+                        """
+                    }
+                }
+                stage('Build Backend') {
+                    steps {
+                        sh """
+                            docker build \\
+                              -t ${env.BACKEND_IMAGE}:${env.IMAGE_TAG} \\
+                              -t ${env.BACKEND_IMAGE}:latest \\
+                              --label "git.commit=${env.SHORT_SHA}" \\
+                              --label "build.number=${BUILD_NUMBER}" \\
+                              -f backend/Dockerfile \\
+                              backend/
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── ⑦ Image Scan — Trivy ────────────────────────────────────────────
+        stage('⑦ Image Scan — Trivy') {
+            parallel {
+                stage('Scan Frontend') {
+                    steps {
+                        sh """
+                            docker run --rm \\
+                              -v /var/run/docker.sock:/var/run/docker.sock \\
+                              -v "${TRIVY_CACHE}:/root/.cache" \\
+                              -v "\${WORKSPACE}/${REPORTS}:/reports" \\
+                              aquasec/trivy:latest image \\
+                                --format json \\
+                                --output /reports/trivy-frontend.json \\
+                                --severity MEDIUM,HIGH,CRITICAL \\
+                                --ignore-unfixed \\
+                                --exit-code 0 \\
+                                ${env.FRONTEND_IMAGE}:${env.IMAGE_TAG}
+                        """
+                        // Hard gate — fail on unfixed CRITICAL
+                        sh """
+                            docker run --rm \\
+                              -v /var/run/docker.sock:/var/run/docker.sock \\
+                              -v "${TRIVY_CACHE}:/root/.cache" \\
+                              -v "\${WORKSPACE}:/src" \\
+                              aquasec/trivy:latest image \\
+                                --ignorefile /src/.trivyignore \\
+                                --severity CRITICAL \\
+                                --ignore-unfixed \\
+                                --exit-code 1 \\
+                                ${env.FRONTEND_IMAGE}:${env.IMAGE_TAG}
+                        """
+                    }
+                    post { always { archiveArtifacts artifacts: "${REPORTS}/trivy-frontend.json" } }
+                }
+                stage('Scan Backend') {
+                    steps {
+                        sh """
+                            docker run --rm \\
+                              -v /var/run/docker.sock:/var/run/docker.sock \\
+                              -v "${TRIVY_CACHE}:/root/.cache" \\
+                              -v "\${WORKSPACE}/${REPORTS}:/reports" \\
+                              aquasec/trivy:latest image \\
+                                --format json \\
+                                --output /reports/trivy-backend.json \\
+                                --severity MEDIUM,HIGH,CRITICAL \\
+                                --ignore-unfixed \\
+                                --exit-code 0 \\
+                                ${env.BACKEND_IMAGE}:${env.IMAGE_TAG}
+                        """
+                        sh """
+                            docker run --rm \\
+                              -v /var/run/docker.sock:/var/run/docker.sock \\
+                              -v "${TRIVY_CACHE}:/root/.cache" \\
+                              -v "\${WORKSPACE}:/src" \\
+                              aquasec/trivy:latest image \\
+                                --ignorefile /src/.trivyignore \\
+                                --severity CRITICAL \\
+                                --ignore-unfixed \\
+                                --exit-code 1 \\
+                                ${env.BACKEND_IMAGE}:${env.IMAGE_TAG}
+                        """
+                    }
+                    post { always { archiveArtifacts artifacts: "${REPORTS}/trivy-backend.json" } }
+                }
+            }
+        }
+
+        // ── ⑧ Integration Spin-Up ───────────────────────────────────────────
+        stage('⑧ Integration Spin-Up') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'BUSHIDO_DB_PASSWORD', variable: 'DB_PASS'),
+                    string(credentialsId: 'BUSHIDO_JWT_SECRET',  variable: 'JWT_SEC')
+                ]) {
+                    sh '''
+                        printf "MYSQL_ROOT_PASSWORD=%s\\n" "${DB_PASS}"  >  .env
+                        printf "MYSQL_DATABASE=bushido_db\\n"            >> .env
+                        printf "MYSQL_USER=bushido_user\\n"              >> .env
+                        printf "MYSQL_PASSWORD=%s\\n"    "${DB_PASS}"    >> .env
+                        printf "MYSQL_HOST=db\\n"                        >> .env
+                        printf "MYSQL_PORT=3306\\n"                      >> .env
+                        printf "SECRET_KEY=%s\\n"         "${JWT_SEC}"   >> .env
+                        printf "JWT_SECRET_KEY=%s\\n"     "${JWT_SEC}"   >> .env
+                        printf "FLASK_ENV=testing\\n"                    >> .env
+
+                        docker compose up -d db
+                        timeout 90 sh -c \
+                          'until docker compose exec -T db mysqladmin ping --silent 2>/dev/null; \
+                           do echo "waiting for MySQL..."; sleep 3; done'
+                        docker compose up -d backend
+                        sleep 12
+                        docker compose up -d frontend
+                        sleep 5
+                    '''
+                }
+            }
+        }
+
+        // ── ⑨ Health Checks ─────────────────────────────────────────────────
+        stage('⑨ Health Checks') {
+            steps {
+                sh '''
+                    curl -sf --retry 5 --retry-delay 3 http://localhost:80 > /dev/null \
+                      && echo "✅ Frontend OK" || { echo "❌ Frontend DOWN"; exit 1; }
+
+                    curl -sf --retry 5 --retry-delay 3 http://localhost:5000/api/products > /dev/null \
+                      && echo "✅ Backend OK"  || { echo "❌ Backend DOWN";  exit 1; }
+                '''
+            }
+        }
+
+        // ── ⑩ DAST — OWASP ZAP ─────────────────────────────────────────────
+        stage('⑩ DAST — OWASP ZAP') {
+            steps {
+                sh """
+                    docker run --rm \\
+                      --network host \\
+                      -v "\${WORKSPACE}/${REPORTS}:/zap/wrk:rw" \\
+                      owasp/zap2docker-stable:latest \\
+                        zap-baseline.py \\
+                          -t http://localhost:80 \\
+                          -J zap-report.json \\
+                          -r zap-report.html \\
+                          -I || true
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${REPORTS}/zap-report.*", allowEmptyArchive: true
+                    publishHTML([
+                        allowMissing: true,
+                        reportDir: "${REPORTS}",
+                        reportFiles: 'zap-report.html',
+                        reportName: 'OWASP ZAP DAST Report',
+                        keepAll: true
+                    ])
+                }
+            }
+        }
+
+        // ── ⑪ Push to Docker Hub ────────────────────────────────────────────
+        stage('⑪ Push to Docker Hub') {
+            when { branch 'main' }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-hub-creds',
+                    usernameVariable: 'DH_USER',
+                    passwordVariable: 'DH_PASS'
+                )]) {
+                    sh 'echo "${DH_PASS}" | docker login -u "${DH_USER}" --password-stdin'
+                    sh """
+                        docker push ${env.FRONTEND_IMAGE}:${env.IMAGE_TAG}
+                        docker push ${env.FRONTEND_IMAGE}:latest
+                        docker push ${env.BACKEND_IMAGE}:${env.IMAGE_TAG}
+                        docker push ${env.BACKEND_IMAGE}:latest
+                        docker logout
+                        echo "📤 Pushed ${env.IMAGE_TAG}"
+                    """
+                }
+            }
+        }
+
+        // ── ⑫ Update GitOps values.yaml ────────────────────────────────────
+        // GitOps bridge: CI edits values.yaml in the gitops repo →
+        // ArgoCD detects the change → auto-deploys to K8s.
+        stage('⑫ Update GitOps') {
+            when { branch 'main' }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'GITOPS_REPO_CREDS',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_PASS'
+                )]) {
+                    sh """
+                        # Install yq if not present on the Jenkins agent
+                        which yq || (wget -qO /usr/local/bin/yq \\
+                          https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \\
+                          && chmod +x /usr/local/bin/yq)
+
+                        # Clone the GitOps repo
+                        rm -rf gitops-update
+                        git clone https://${GIT_USER}:${GIT_PASS}@\$(echo ${GITOPS_REPO} | sed 's|https://||') gitops-update
+                        cd gitops-update
+
+                        # Update image tags in values.yaml
+                        yq e '.frontend.image.tag = "${env.IMAGE_TAG}"' -i helm/values.yaml
+                        yq e '.backend.image.tag  = "${env.IMAGE_TAG}"' -i helm/values.yaml
+
+                        # Commit and push
+                        git config user.email "jenkins@bushido-brand.local"
+                        git config user.name  "Jenkins CI"
+                        git add helm/values.yaml
+                        git commit -m "chore: update image tags to ${env.IMAGE_TAG} [skip ci]"
+                        git push origin ${GITOPS_BRANCH}
+
+                        echo "✅ GitOps updated — ArgoCD will sync automatically"
+                    """
+                }
+            }
+            post {
+                always { sh 'rm -rf gitops-update || true' }
             }
         }
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    //  POST — runs after ALL stages complete (regardless of success/failure)
-    // ═════════════════════════════════════════════════════════════════════════
     post {
-        // ─── ON SUCCESS ─────────────────────────────────────────────────────
-        // If CI passed AND we're on main/master/release branch:
-        //   → Trigger the CD pipeline (bushido-brand-CD)
-        //   → Pass commit SHA and image tags so CD doesn't recompute them
-        success {
-            script {
-                if (env.BRANCH_NAME =~ /^(main|master|release\/.*)$/) {
-                    echo "CI passed on ${env.BRANCH_NAME} — triggering bushido-brand-CD..."
-                    build job: 'bushido-brand-CD',
-                          parameters: [
-                              string(name: 'GIT_COMMIT_SHORT', value: env.GIT_COMMIT_SHORT),
-                              string(name: 'BACKEND_IMAGE',   value: env.BACKEND_IMAGE),
-                              string(name: 'FRONTEND_IMAGE',  value: env.FRONTEND_IMAGE)
-                          ],
-                          wait: false
-                }
-            }
-            echo "Slack: SUCCESS for Bushido Brand (CI) [${env.GIT_COMMIT_SHORT}]"
-        }
-
-        // ─── ON FAILURE ─────────────────────────────────────────────────────
-        failure {
-            echo "Slack: FAILURE for Bushido Brand (CI) [${env.GIT_COMMIT_SHORT}]"
-        }
-
-        // ─── ALWAYS (cleanup) ──────────────────────────────────────────────
         always {
-            cleanWs()
+            sh 'docker compose down --remove-orphans || true'
+            sh 'rm -f .env || true'
+            archiveArtifacts artifacts: "${REPORTS}/**/*", allowEmptyArchive: true
+        }
+        success {
+            echo '✅ CI pipeline PASSED — GitOps repo updated, ArgoCD syncing.'
+            // Optionally trigger CD pipeline:
+            // build job: 'bushido-brand-CD', wait: false,
+            //   parameters: [string(name: 'IMAGE_TAG', value: env.IMAGE_TAG)]
+        }
+        failure {
+            echo '❌ CI pipeline FAILED — review security-reports/ for details.'
         }
     }
 }

@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# backend/bandit.yaml — Bandit SAST config for Bushido Brand Flask API
+# ─────────────────────────────────────────────────────────────────────────────
+
+skips:
+  # B104: Binding to 0.0.0.0 — expected inside a container
+  - B104
+
+tests: []
+
+exclude_dirs:
+  - tests
+  - .venv
+  - venv
+  - __pycache__
+
+hardcoded_password_string:
+  word_list:
+    - password
+    - passwd
+    - pass
+    - pwd
+    - secret
+    - token
+    - api_key
+    - apikey
+    - auth_key
+    - credentials
