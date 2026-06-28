@@ -91,7 +91,7 @@ pipeline {
                     } else {
                         // ─── MANUAL TRIGGER ────────────────────────────────
                         // No params provided — check out the repo and compute.
-                        checkout scm
+                        checkout([$class: 'GitSCM', branches: [[name: '*/main']], userRemoteConfigs: [[url: 'https://github.com/HamzaMaLik121/bushido-brand-app-.git', credentialsId: 'Github-cred']]])
                         env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
                         env.BACKEND_IMAGE    = "bushidobrand/bushido-brand-backend:${env.GIT_COMMIT_SHORT}"
                         env.FRONTEND_IMAGE   = "bushidobrand/bushido-brand-frontend:${env.GIT_COMMIT_SHORT}"
@@ -214,27 +214,15 @@ pipeline {
     // ═════════════════════════════════════════════════════════════════════════
     post {
         // ─── ON SUCCESS ─────────────────────────────────────────────────────
-        // notifySlack → shared library function
-        // Sends a green "deploy successful" message to Slack #deployments
-        // showing the commit SHA and app name.
+        // Slack notification skipped — not configured yet
         success {
-            notifySlack(
-                status: 'SUCCESS',
-                appName: 'Bushido Brand (CD)',
-                imageTag: env.GIT_COMMIT_SHORT,
-                channel: '#deployments'
-            )
+            echo "Slack: SUCCESS for Bushido Brand (CD) [${env.GIT_COMMIT_SHORT}]"
         }
 
         // ─── ON FAILURE ─────────────────────────────────────────────────────
-        // Sends a red "deploy failed" message so the team knows immediately.
+        // Slack notification skipped — not configured yet
         failure {
-            notifySlack(
-                status: 'FAILURE',
-                appName: 'Bushido Brand (CD)',
-                imageTag: env.GIT_COMMIT_SHORT,
-                channel: '#deployments'
-            )
+            echo "Slack: FAILURE for Bushido Brand (CD) [${env.GIT_COMMIT_SHORT}]"
         }
 
         // ─── ALWAYS (cleanup) ──────────────────────────────────────────────

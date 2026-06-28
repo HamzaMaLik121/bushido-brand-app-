@@ -1,9 +1,0 @@
-apiVersion: v2
-name: db
-description: MySQL 8.0 database tier — persistent data store for Bushido Brand
-type: application
-version: 0.1.0
-appVersion: "8.0"
-maintainers:
-  - name: DevSecOps Team
-    email: devsecops-team@bushidobrand.com

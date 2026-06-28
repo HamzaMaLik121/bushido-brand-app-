@@ -17,16 +17,12 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')
         timeout(time: 60, unit: 'MINUTES')
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     environment {
-        // ─── Global Config ─────────────────────────────────────────────────
-        GIT_COMMIT_SHORT = ''
-
         // ─── Backend ───────────────────────────────────────────────────────
         BACKEND_APP_NAME        = 'backend'
         BACKEND_DOCKER_REPO     = 'bushidobrand/bushido-brand-backend'
@@ -35,7 +31,7 @@ pipeline {
         BACKEND_ARGO_APP        = 'bushido-brand-backend'
         BACKEND_DOCKERFILE      = 'backend/Dockerfile'
         BACKEND_BUILD_CONTEXT   = 'backend'
-        BACKEND_IMAGE           = ''
+        // Note: BACKEND_IMAGE is set at runtime in the checkout stage
 
         // ─── Frontend ──────────────────────────────────────────────────────
         FRONTEND_APP_NAME        = 'frontend'
@@ -45,7 +41,7 @@ pipeline {
         FRONTEND_ARGO_APP        = 'bushido-brand-frontend'
         FRONTEND_DOCKERFILE      = 'frontend/Dockerfile'
         FRONTEND_BUILD_CONTEXT   = 'frontend'
-        FRONTEND_IMAGE           = ''
+        // Note: FRONTEND_IMAGE is set at runtime in the checkout stage
     }
 
     stages {
@@ -57,13 +53,14 @@ pipeline {
         stage('CI — Checkout') {
             steps {
                 script {
-                    checkout scm
-                    env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
-                    env.BACKEND_IMAGE  = "${BACKEND_DOCKER_REPO}:${GIT_COMMIT_SHORT}"
-                    env.FRONTEND_IMAGE = "${FRONTEND_DOCKER_REPO}:${GIT_COMMIT_SHORT}"
-                    echo "Commit: ${GIT_COMMIT_SHORT}"
-                    echo "Backend image:  ${BACKEND_IMAGE}"
-                    echo "Frontend image: ${FRONTEND_IMAGE}"
+                    checkout([$class: 'GitSCM', branches: [[name: '*/main']], userRemoteConfigs: [[url: 'https://github.com/HamzaMaLik121/bushido-brand-app-.git', credentialsId: 'Github-cred']]])
+                    env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short HEAD 2>/dev/null || true').trim()
+                    if (!env.GIT_COMMIT_SHORT) env.GIT_COMMIT_SHORT = 'unknown'
+                    env.BACKEND_IMAGE  = "${env.BACKEND_DOCKER_REPO}:${env.GIT_COMMIT_SHORT}"
+                    env.FRONTEND_IMAGE = "${env.FRONTEND_DOCKER_REPO}:${env.GIT_COMMIT_SHORT}"
+                    echo "Commit: ${env.GIT_COMMIT_SHORT}"
+                    echo "Backend image:  ${env.BACKEND_IMAGE}"
+                    echo "Frontend image: ${env.FRONTEND_IMAGE}"
                 }
             }
         }
@@ -219,20 +216,10 @@ pipeline {
 
     post {
         success {
-            notifySlack(
-                status: 'SUCCESS',
-                appName: 'Bushido Brand',
-                imageTag: env.GIT_COMMIT_SHORT,
-                channel: '#deployments'
-            )
+            echo "Slack: SUCCESS for Bushido Brand [${env.GIT_COMMIT_SHORT}]"
         }
         failure {
-            notifySlack(
-                status: 'FAILURE',
-                appName: 'Bushido Brand',
-                imageTag: env.GIT_COMMIT_SHORT,
-                channel: '#deployments'
-            )
+            echo "Slack: FAILURE for Bushido Brand [${env.GIT_COMMIT_SHORT}]"
         }
         always {
             cleanWs()
